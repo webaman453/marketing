@@ -3,7 +3,7 @@
 # the API, the background worker and the one-off migration job.
 
 FROM node:22-bookworm-slim AS base
-ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=true NEXT_TELEMETRY_DISABLED=1
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=true NEXT_TELEMETRY_DISABLED=1 TURBO_TELEMETRY_DISABLED=1
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable && corepack prepare pnpm@9.15.0 --activate
@@ -17,7 +17,8 @@ ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
 # The web app proxies /api/* to this address; it's fixed at build time.
 ARG API_URL=http://api:4100
 ENV API_URL=$API_URL
-RUN pnpm --filter @ashniva/db run generate && pnpm turbo run build
+# turbo.json passes DATABASE_URL to prisma generate and API_URL to the web build.
+RUN pnpm turbo run build
 
 FROM base AS runtime
 ENV NODE_ENV=production
