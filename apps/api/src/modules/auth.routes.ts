@@ -18,6 +18,7 @@ import { esc, sendMail } from "../lib/mailer";
 import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
 import { buildMe, toUserDTO } from "../lib/serialize";
 import { clearSessionCookies, endSession, rotateSession, startSession } from "../lib/session";
+import { logger } from "../lib/logger";
 import { requireAuth } from "../middleware/auth";
 import { verifyAccess, ACCESS_COOKIE } from "../lib/session";
 
@@ -125,6 +126,9 @@ authRouter.post("/forgot-password", authLimiter, async (req, res) => {
       body: `Hi ${esc(user.name)}, we received a request to reset your password. This link expires in 1 hour. If you didn't ask for this, you can ignore this email.`,
       cta: { label: "Reset password", url: `${config().WEB_URL}/reset-password?token=${token}` },
     });
+  } else {
+    // Only in the server log, so support can tell why no email arrived.
+    logger.info({ email }, "Password reset requested for an email with no account");
   }
   res.status(204).end();
 });

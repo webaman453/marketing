@@ -36,6 +36,7 @@ export async function sendMail(mail: Mail) {
     // SMTP or Resend, whichever the admin console (or .env) has set up.
     const sent = await deliverEmail({ to: [mail.to], subject: mail.subject, html: render(mail) });
     if (!sent) logger.info({ to: mail.to, subject: mail.subject, link: mail.cta?.url }, "📧 Email (not sent: no SMTP or Resend configured)");
+    else logger.info({ to: mail.to, subject: mail.subject }, "📧 Email sent");
   } catch (err) {
     // A mail outage shouldn't break sign-up or invites.
     logger.error({ err, to: mail.to, subject: mail.subject }, "Failed to send email");
