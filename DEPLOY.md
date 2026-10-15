@@ -36,18 +36,26 @@ Works on any Linux VPS with 2 vCPU / 4 GB RAM or more (DigitalOcean, AWS Lightsa
    SUPER_ADMIN_EMAILS=you@yourcompany.com
    ```
    `DATABASE_URL`, `REDIS_URL` and `API_URL` are set by `docker-compose.yml`; leave them as they are. Keep `TOKEN_ENCRYPTION_KEY` safe and never change it: saved platform logins and admin-console keys are encrypted with it.
-5. **Start everything:**
-   ```bash
-   docker compose up -d --build
-   ```
-   The first build takes a few minutes. Caddy gets an HTTPS certificate for `DOMAIN` automatically (ports 80 and 443 must be open).
+5. **Start everything.** Pick one:
+   - **The server already runs nginx** (other sites on ports 80/443):
+     ```bash
+     docker compose up -d --build
+     ```
+     The web app listens on `127.0.0.1:3100` only (set `WEB_PORT` in `.env` if 3100 is taken). Add [deploy/nginx.conf](deploy/nginx.conf) as a site for your domain, reload nginx, then run `certbot --nginx -d <domain>` for HTTPS.
+   - **Nothing else on ports 80/443:** let the bundled Caddy handle HTTPS:
+     ```bash
+     docker compose --profile caddy up -d --build
+     ```
+     Caddy gets a certificate for `DOMAIN` automatically.
+
+   The first build takes a few minutes.
 6. **Create your admin account:** open `https://<domain>/signup` and sign up with the email you put in `SUPER_ADMIN_EMAILS`. You then have **Admin** in the sidebar.
 7. **Add keys and prices in the app:** Admin → *API keys & integrations* (Meta, Google, …, AI, Razorpay, Resend) and Admin → *Plans & pricing*. Each card shows the redirect URL to register with that platform.
 
 Updating to a new version:
 ```bash
 git pull
-docker compose up -d --build
+docker compose up -d --build        # add --profile caddy if you use Caddy
 ```
 Migrations run automatically before the API starts.
 

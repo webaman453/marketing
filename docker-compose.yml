@@ -1,5 +1,6 @@
 # Production stack for a single server (VPS). See DEPLOY.md.
-#   docker compose up -d --build
+#   docker compose up -d --build                    # behind the server's own nginx
+#   docker compose --profile caddy up -d --build    # or with built-in HTTPS (Caddy)
 # Values like ${POSTGRES_PASSWORD} come from the .env file next to this one.
 
 x-app: &app
@@ -14,7 +15,7 @@ x-app: &app
     REDIS_URL: redis://redis:6379
     API_URL: http://api:4100
     UPLOAD_DIR: /data/uploads
-    # Caddy → web → API: two proxies in front of the API.
+    # nginx/Caddy → web → API: two proxies in front of the API.
     TRUST_PROXY: "2"
   volumes:
     - uploads:/data/uploads
@@ -86,18 +87,25 @@ services:
     <<: *app
     working_dir: /app/apps/web
     command: ["pnpm", "start"]
+    # Only reachable from the server itself; nginx (or Caddy below) handles the public domain and HTTPS.
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3100}:3100"
     depends_on:
       api:
         condition: service_healthy
 
+  # Built-in HTTPS for a server that has nothing else on ports 80/443:
+  #   docker compose --profile caddy up -d --build
+  # Skip it when the server already runs nginx; see DEPLOY.md.
   caddy:
     image: caddy:2-alpine
+    profiles: ["caddy"]
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, e.g. ads.yourcompany.com}
+      DOMAIN: ${DOMAIN:-localhost}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
