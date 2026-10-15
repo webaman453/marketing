@@ -19,6 +19,8 @@ export interface CredentialField {
   placeholder?: string;
   help?: string;
   options?: { value: string; label: string }[];
+  /** Only shown (and only required) when another field has one of these values. */
+  showWhen?: { key: string; values: string[] };
 }
 
 export type CredentialGroupId = "META" | "GOOGLE" | "TIKTOK" | "LINKEDIN" | "MICROSOFT" | "SNAPCHAT" | "PINTEREST" | "AI" | "RAZORPAY" | "EMAIL";
@@ -217,7 +219,7 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
       },
       { key: "AI_API_KEY", label: "API key", secret: true },
       { key: "AI_MODEL", label: "Model", optional: true, placeholder: "Recommended model", help: "Defaults: gemini-3.8-flash · gpt-6.1-sol · claude-sonnet-5-5." },
-      { key: "AI_BASE_URL", label: "Base URL", optional: true, placeholder: "https://openrouter.ai/api/v1", help: "Only for OpenAI-compatible providers." },
+      { key: "AI_BASE_URL", label: "Base URL", placeholder: "https://openrouter.ai/api/v1", help: "Where the OpenAI-compatible service answers.", showWhen: { key: "AI_PROVIDER", values: ["OPENAI_COMPATIBLE"] } },
     ],
   },
   {
@@ -243,25 +245,64 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
   },
   {
     id: "EMAIL",
-    title: "Email (Resend)",
+    title: "Email (SMTP or Resend)",
     kind: "email",
-    purpose: "Sends invitations, password resets, alerts and scheduled reports.",
+    purpose: "Sends invitations, password reset links, alerts and scheduled reports.",
     consoleUrl: "https://resend.com/api-keys",
     consoleLabel: "Resend",
     steps: [
-      "In Resend, add your domain under Domains and add the DNS records it shows.",
-      "Create an API key with sending access and paste it here.",
-      "Set the From address to an address on that verified domain, then use Test to send yourself an email.",
+      "SMTP works with any mail server or provider: your own server, Google Workspace (smtp.gmail.com, with an app password), Zoho (smtp.zoho.in), Microsoft 365 (smtp.office365.com), Hostinger (smtp.hostinger.com), Amazon SES and others.",
+      "Use port 587 (STARTTLS) or 465 (SSL). The username is usually the full mailbox address.",
+      "Or choose Resend: add and verify your domain at resend.com, then create an API key with sending access.",
+      "Set the From address to a mailbox on your domain (with SMTP it usually has to match the username), then use Test to send yourself an email.",
     ],
     testable: true,
     fields: [
-      { key: "RESEND_API_KEY", label: "API key", secret: true, placeholder: "re_…" },
+      {
+        key: "EMAIL_PROVIDER",
+        label: "Send with",
+        options: [
+          { value: "SMTP", label: "SMTP server" },
+          { value: "RESEND", label: "Resend" },
+        ],
+      },
+      { key: "SMTP_HOST", label: "SMTP host", placeholder: "smtp.yourdomain.com", showWhen: { key: "EMAIL_PROVIDER", values: ["SMTP"] } },
+      { key: "SMTP_PORT", label: "Port", optional: true, placeholder: "587", help: "587 (STARTTLS) or 465 (SSL).", showWhen: { key: "EMAIL_PROVIDER", values: ["SMTP"] } },
+      { key: "SMTP_USER", label: "Username", placeholder: "no-reply@yourdomain.com", showWhen: { key: "EMAIL_PROVIDER", values: ["SMTP"] } },
+      { key: "SMTP_PASSWORD", label: "Password", secret: true, showWhen: { key: "EMAIL_PROVIDER", values: ["SMTP"] } },
+      { key: "RESEND_API_KEY", label: "Resend API key", secret: true, placeholder: "re_…", showWhen: { key: "EMAIL_PROVIDER", values: ["RESEND"] } },
       { key: "EMAIL_FROM", label: "From address", optional: true, placeholder: "Ashniva Ads <no-reply@yourdomain.com>" },
     ],
   },
 ];
 
 export const MANAGED_ENV_KEYS = CREDENTIAL_GROUPS.flatMap((g) => g.fields.map((f) => f.key));
+
+/** A dropdown field without a saved value counts as its first option. */
+export function credentialValue(field: CredentialField, raw: string | null | undefined) {
+  return raw || field.options?.[0]?.value || "";
+}
+
+/**
+ * Whether a field applies given the group's other values (e.g. SMTP fields
+ * only when sending with SMTP). `valueOf` returns the raw value of a key.
+ */
+export function credentialFieldApplies(group: CredentialGroup, field: CredentialField, valueOf: (key: string) => string | null | undefined) {
+  if (!field.showWhen) return true;
+  const dep = group.fields.find((f) => f.key === field.showWhen!.key);
+  const v = dep ? credentialValue(dep, valueOf(dep.key)) : valueOf(field.showWhen.key) ?? "";
+  return field.showWhen.values.includes(v);
+}
+
+/** Which email service sends mail: EMAIL_PROVIDER, or whichever one has keys (SMTP first). */
+export function emailProvider(env: Record<string, string | undefined>): "SMTP" | "RESEND" | null {
+  const chosen = env.EMAIL_PROVIDER?.toUpperCase();
+  const smtp = Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD);
+  const resend = Boolean(env.RESEND_API_KEY);
+  if (chosen === "SMTP") return smtp ? "SMTP" : null;
+  if (chosen === "RESEND") return resend ? "RESEND" : null;
+  return smtp ? "SMTP" : resend ? "RESEND" : null;
+}
 export const credentialGroupFor = (platform: Platform) => CREDENTIAL_GROUPS.find((g) => g.platform === platform);
 
 export interface CredentialFieldStatus {

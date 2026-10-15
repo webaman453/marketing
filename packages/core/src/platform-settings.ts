@@ -9,6 +9,8 @@ import {
   MANAGED_ENV_KEYS,
   applyCatalog,
   catalogSchema,
+  credentialFieldApplies,
+  emailProvider,
   defaultCatalog,
   type Catalog,
   type CredentialGroupStatus,
@@ -91,18 +93,23 @@ export async function loadPlatformSettings(force = false): Promise<void> {
 
 const mask = (v: string) => (v.length <= 4 ? "••••" : `••••${v.slice(-4)}`);
 
+/** Current value of a key; an unset EMAIL_PROVIDER shows the service actually in use. */
+const effectiveValue = (key: string) =>
+  key === "EMAIL_PROVIDER" && !process.env.EMAIL_PROVIDER ? (emailProvider(process.env) ?? "") : (process.env[key] ?? "");
+
 export function credentialStatus(): CredentialGroupStatus[] {
   snapshotEnv();
   return CREDENTIAL_GROUPS.map((g) => {
     const fields = g.fields.map((f) => {
-      const value = process.env[f.key] ?? "";
+      const value = effectiveValue(f.key);
       const source = consoleKeys.has(f.key) ? ("console" as const) : value ? ("env" as const) : null;
       return { key: f.key, set: Boolean(value), source, display: value ? (f.secret ? mask(value) : value) : null };
     });
     const times = g.fields.map((f) => updatedAtByKey.get(f.key)).filter((d): d is Date => Boolean(d));
     return {
       id: g.id,
-      configured: g.fields.every((f, i) => f.optional || fields[i]!.set),
+      // Fields for another choice (e.g. Resend while sending with SMTP) don't count.
+      configured: g.fields.every((f, i) => f.optional || f.options || !credentialFieldApplies(g, f, effectiveValue) || fields[i]!.set),
       fields,
       updatedAt: times.length ? new Date(Math.max(...times.map((d) => d.getTime()))).toISOString() : null,
     };

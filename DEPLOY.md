@@ -97,5 +97,5 @@ Run `apps/api` (`node dist/index.js`), `apps/worker` (`node dist/index.js`) and 
 - [ ] Your account is in `SUPER_ADMIN_EMAILS`; the demo account from the seed script is **not** used in production (don't run `pnpm db:seed` there).
 - [ ] Platform apps registered with the production redirect URLs, and their App Review / API access approved.
 - [ ] Razorpay live keys and the webhook added in Admin → API keys; a test payment done.
-- [ ] Resend domain verified and a test email sent from Admin → API keys.
+- [ ] Email set up in Admin → API keys → Email (SMTP server or Resend) and a test email received. Without it, password reset links and invitations are only written to the API logs (`docker compose logs api | grep -i email`).
 - [ ] Database backups scheduled.

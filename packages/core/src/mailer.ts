@@ -1,4 +1,5 @@
-import { BRAND } from "@ashniva/shared";
+import { BRAND, emailProvider } from "@ashniva/shared";
+import nodemailer, { type Transporter } from "nodemailer";
 
 /** Escape user-provided text before placing it in email HTML. */
 export const esc = (s: string) =>
@@ -37,28 +38,88 @@ function render({ heading, body, cta, brand }: Mail) {
 </body></html>`;
 }
 
-/** Sends through Resend when configured; otherwise logs the email (development). */
-export async function sendMail(mail: Mail): Promise<void> {
-  const key = process.env.RESEND_API_KEY;
-  const to = Array.isArray(mail.to) ? mail.to : [mail.to];
-  if (!key) {
-    console.info(
-      `📧 [email not sent: RESEND_API_KEY missing] to=${to.join(",")} subject="${mail.subject}"${mail.cta ? ` link=${mail.cta.url}` : ""}${
-        mail.attachments?.length ? ` attachments=${mail.attachments.map((a) => a.filename).join(",")}` : ""
-      }`,
-    );
-    return;
+export interface OutgoingEmail {
+  to: string[];
+  subject: string;
+  html: string;
+  attachments?: { filename: string; content: Buffer }[];
+}
+
+const defaultFrom = () => process.env.EMAIL_FROM || `${BRAND.name} <no-reply@ashniva.com>`;
+
+let smtp: { key: string; transport: Transporter } | null = null;
+
+/** One SMTP connection pool, rebuilt when the admin console changes the settings. */
+function smtpTransport(): Transporter {
+  const port = Number(process.env.SMTP_PORT || 587);
+  const key = [process.env.SMTP_HOST, port, process.env.SMTP_USER, process.env.SMTP_PASSWORD].join("|");
+  if (smtp?.key !== key) {
+    smtp?.transport.close();
+    smtp = {
+      key,
+      transport: nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port,
+        // 465 is SSL from the first byte; 587 and 25 upgrade with STARTTLS.
+        secure: port === 465,
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+        pool: true,
+        connectionTimeout: 15_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 30_000,
+      }),
+    };
+  }
+  return smtp.transport;
+}
+
+/** Checks the SMTP login without sending anything; throws with the server's answer. */
+export async function verifySmtp() {
+  await smtpTransport().verify();
+}
+
+/**
+ * Sends one email with SMTP or Resend, whichever is configured (admin console
+ * or .env). Returns false when neither is, so callers can log the email instead.
+ */
+export async function deliverEmail(mail: OutgoingEmail): Promise<boolean> {
+  const provider = emailProvider(process.env);
+  if (!provider) return false;
+  if (provider === "SMTP") {
+    await smtpTransport().sendMail({
+      from: defaultFrom(),
+      to: mail.to,
+      subject: mail.subject,
+      html: mail.html,
+      attachments: mail.attachments?.map((a) => ({ filename: a.filename, content: a.content })),
+    });
+    return true;
   }
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM || `${BRAND.name} <no-reply@ashniva.com>`,
-      to,
+      from: defaultFrom(),
+      to: mail.to,
       subject: mail.subject,
-      html: render(mail),
+      html: mail.html,
       attachments: mail.attachments?.map((a) => ({ filename: a.filename, content: a.content.toString("base64") })),
     }),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) throw new Error(`Email send failed (${res.status}): ${await res.text()}`);
+  return true;
+}
+
+/** Sends through SMTP or Resend when configured; otherwise logs the email (development). */
+export async function sendMail(mail: Mail): Promise<void> {
+  const to = Array.isArray(mail.to) ? mail.to : [mail.to];
+  const sent = await deliverEmail({ to, subject: mail.subject, html: render(mail), attachments: mail.attachments });
+  if (!sent) {
+    console.info(
+      `📧 [email not sent: no SMTP or Resend configured] to=${to.join(",")} subject="${mail.subject}"${mail.cta ? ` link=${mail.cta.url}` : ""}${
+        mail.attachments?.length ? ` attachments=${mail.attachments.map((a) => a.filename).join(",")}` : ""
+      }`,
+    );
+  }
 }

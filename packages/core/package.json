@@ -21,11 +21,13 @@
     "dotenv": "^17.2.0",
     "image-size": "^2.0.4",
     "ioredis": "^5.8.0",
+    "nodemailer": "^10.0.11",
     "pdfkit": "^0.20.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/pdfkit": "^0.17.6",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3"

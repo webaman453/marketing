@@ -10,6 +10,7 @@ import {
   saveCatalog,
   saveCredentials,
   sendMail,
+  verifySmtp,
 } from "@ashniva/core";
 import { prisma } from "@ashniva/db";
 import {
@@ -18,6 +19,7 @@ import {
   PLATFORMS,
   catalogSchema,
   currentCatalog,
+  emailProvider,
   saveCredentialsSchema,
   type CredentialGroupId,
   type CredentialsDTO,
@@ -96,7 +98,19 @@ async function runTest(id: CredentialGroupId, userId: string): Promise<string> {
         ? "Razorpay keys work (test mode: no real money is charged)."
         : "Razorpay keys work (live mode).";
     case "EMAIL": {
-      if (!process.env.RESEND_API_KEY) throw new Error("Add the Resend API key first.");
+      const provider = emailProvider(process.env);
+      if (!provider) {
+        throw new Error(
+          process.env.EMAIL_PROVIDER === "RESEND" ? "Add the Resend API key first." : "Add the SMTP host, username and password first.",
+        );
+      }
+      if (provider === "SMTP") {
+        try {
+          await verifySmtp();
+        } catch (err) {
+          throw new Error(`The SMTP server refused the login: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
       await sendMail({
         to: user.email,
@@ -104,7 +118,7 @@ async function runTest(id: CredentialGroupId, userId: string): Promise<string> {
         heading: "Email is working",
         body: "This test was sent from the admin console. Invitations, password resets and reports will be delivered the same way.",
       });
-      return `Test email sent to ${user.email}.`;
+      return `Test email sent to ${user.email} with ${provider === "SMTP" ? `SMTP (${process.env.SMTP_HOST})` : "Resend"}. Check the inbox (and spam).`;
     }
     default:
       throw new Error("This integration can't be checked from here.");

@@ -2,6 +2,9 @@
 
 import {
   CREDENTIAL_GROUPS,
+  credentialFieldApplies,
+  credentialValue,
+  type CredentialField,
   type CredentialGroup,
   type CredentialGroupId,
   type CredentialGroupStatus,
@@ -181,13 +184,32 @@ function GroupIcon({
 }
 
 /** Fields someone has to type: an optional API version or a default provider alone doesn't make a setup "started". */
-const requiredFields = (group: CredentialGroup, status?: CredentialGroupStatus) =>
+const requiredFields = (
+  group: CredentialGroup,
+  status?: CredentialGroupStatus,
+) =>
   (status?.fields ?? []).filter((f) => {
     const def = group.fields.find((g) => g.key === f.key);
-    return def && !def.optional && !def.options;
+    // Fields for the other choice (e.g. Resend while sending with SMTP) don't count either.
+    return (
+      def &&
+      !def.optional &&
+      !def.options &&
+      credentialFieldApplies(
+        group,
+        def,
+        (key) => status?.fields.find((x) => x.key === key)?.display,
+      )
+    );
   });
 
-function StatusBadge({ group, status }: { group: CredentialGroup; status?: CredentialGroupStatus }) {
+function StatusBadge({
+  group,
+  status,
+}: {
+  group: CredentialGroup;
+  status?: CredentialGroupStatus;
+}) {
   if (!status) return null;
   const anySet = requiredFields(group, status).some((f) => f.set);
   if (status.configured) {
@@ -224,7 +246,9 @@ function GroupCard({
   onOpen: () => void;
 }) {
   const required = requiredFields(group, status);
-  const fromEnv = required.some((f) => f.source === "env") && !required.some((f) => f.source === "console");
+  const fromEnv =
+    required.some((f) => f.source === "env") &&
+    !required.some((f) => f.source === "console");
   return (
     <Card className="gap-3 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -345,18 +369,28 @@ function CredentialForm({
     null,
   );
 
-  const provider =
-    values.AI_PROVIDER || current("AI_PROVIDER")?.display || "GEMINI";
-  const visible = group.fields.filter(
-    (f) => f.key !== "AI_BASE_URL" || provider === "OPENAI_COMPATIBLE",
-  );
+  // What a field holds right now: what's typed, else what's saved (dropdowns fall back to their first option).
+  const valueOf = (key: string) => values[key] || current(key)?.display || "";
+  const selectValue = (f: CredentialField) =>
+    credentialValue(f, valueOf(f.key));
+  // e.g. SMTP fields only while "Send with" is SMTP.
+  const applies = (f: CredentialField) =>
+    credentialFieldApplies(group, f, (key) => {
+      const def = group.fields.find((x) => x.key === key);
+      return def ? credentialValue(def, valueOf(key)) : valueOf(key);
+    });
+  const visible = group.fields.filter(applies);
   const hasConsoleValues = status?.fields.some((f) => f.source === "console");
 
   function changes() {
     const out: Record<string, string | null> = {};
     for (const f of group.fields) {
       const v = (values[f.key] ?? "").trim();
-      if (f.secret) {
+      if (f.options) {
+        // Save the choice shown on screen, even when it's the default.
+        const chosen = selectValue(f);
+        if (chosen !== (current(f.key)?.display ?? "")) out[f.key] = chosen;
+      } else if (f.secret) {
         if (v) out[f.key] = v;
       } else if (v !== (current(f.key)?.display ?? "")) {
         out[f.key] = v || null;
@@ -368,9 +402,10 @@ function CredentialForm({
   const missing = group.fields.filter(
     (f) =>
       !f.optional &&
+      !f.options &&
       !(values[f.key] ?? "").trim() &&
       !current(f.key)?.set &&
-      (f.key !== "AI_BASE_URL" || provider === "OPENAI_COMPATIBLE"),
+      applies(f),
   );
 
   async function save(thenTest: boolean) {
@@ -520,7 +555,7 @@ function CredentialForm({
               >
                 {f.options ? (
                   <Select
-                    value={values[f.key] || provider}
+                    value={selectValue(f)}
                     onValueChange={(v) =>
                       setValues((s) => ({ ...s, [f.key]: v }))
                     }

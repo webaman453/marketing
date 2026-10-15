@@ -1,3 +1,4 @@
+import { deliverEmail } from "@ashniva/core";
 import { BRAND } from "@ashniva/shared";
 import { logger } from "./logger";
 
@@ -31,17 +32,12 @@ function render({ heading, body, cta }: Mail) {
 
 /** Sends through Resend when configured; otherwise logs the email (development). */
 export async function sendMail(mail: Mail) {
-  // Read on every send: the admin console can change these at runtime.
-  const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  const EMAIL_FROM = process.env.EMAIL_FROM || "Ashniva Ads <no-reply@ashniva.com>";
-  if (!RESEND_API_KEY) {
-    logger.info({ to: mail.to, subject: mail.subject, link: mail.cta?.url }, "📧 Email (not sent: RESEND_API_KEY missing)");
-    return;
+  try {
+    // SMTP or Resend, whichever the admin console (or .env) has set up.
+    const sent = await deliverEmail({ to: [mail.to], subject: mail.subject, html: render(mail) });
+    if (!sent) logger.info({ to: mail.to, subject: mail.subject, link: mail.cta?.url }, "📧 Email (not sent: no SMTP or Resend configured)");
+  } catch (err) {
+    // A mail outage shouldn't break sign-up or invites.
+    logger.error({ err, to: mail.to, subject: mail.subject }, "Failed to send email");
   }
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: EMAIL_FROM, to: mail.to, subject: mail.subject, html: render(mail) }),
-  });
-  if (!res.ok) logger.error({ status: res.status, body: await res.text() }, "Failed to send email");
 }
