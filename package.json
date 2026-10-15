@@ -1,0 +1,22 @@
+{
+  "name": "ashniva-ads",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "db:generate": "pnpm --filter @ashniva/db generate",
+    "db:migrate": "pnpm --filter @ashniva/db migrate",
+    "db:deploy": "pnpm --filter @ashniva/db run deploy",
+    "db:seed": "pnpm --filter @ashniva/core seed",
+    "db:studio": "pnpm --filter @ashniva/db studio",
+    "localdb:start": "pg_ctl -D .data/postgres status >/dev/null 2>&1 && echo 'Database is already running.' || pg_ctl -D .data/postgres -l .data/postgres.log start",
+    "localdb:stop": "pg_ctl -D .data/postgres stop"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.7",
+    "typescript": "~5.9.3"
+  }
+}

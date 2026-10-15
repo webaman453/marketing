@@ -1,0 +1,14 @@
+node_modules
+.env
+.env.*
+!.env.example
+.data
+dist
+.next
+.turbo
+*.log
+.DS_Store
+coverage
+next-env.d.ts
+packages/db/src/generated
+.claude

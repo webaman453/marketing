@@ -1,0 +1,6 @@
+# HTTPS for your domain (certificates are issued automatically).
+# Everything goes to the web app, which forwards /api/* to the API.
+{$DOMAIN} {
+	encode gzip zstd
+	reverse_proxy web:3100
+}

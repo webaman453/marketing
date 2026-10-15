@@ -1,0 +1,113 @@
+# Production stack for a single server (VPS). See DEPLOY.md.
+#   docker compose up -d --build
+# Values like ${POSTGRES_PASSWORD} come from the .env file next to this one.
+
+x-app: &app
+  # Built once from the Dockerfile; every app service runs the same image.
+  build: .
+  image: ashniva-ads:latest
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    DATABASE_URL: postgresql://${POSTGRES_USER:-ashniva}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-ashniva_ads}
+    REDIS_URL: redis://redis:6379
+    API_URL: http://api:4100
+    UPLOAD_DIR: /data/uploads
+    # Caddy → web → API: two proxies in front of the API.
+    TRUST_PROXY: "2"
+  volumes:
+    - uploads:/data/uploads
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ashniva}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ashniva_ads}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ashniva} -d ${POSTGRES_DB:-ashniva_ads}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Applies database migrations, then exits. api and worker wait for it.
+  migrate:
+    <<: *app
+    restart: "no"
+    working_dir: /app/packages/db
+    command: ["pnpm", "run", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    working_dir: /app/apps/api
+    command: ["node", "dist/index.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4100/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *app
+    working_dir: /app/apps/worker
+    command: ["node", "dist/index.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    working_dir: /app/apps/web
+    command: ["pnpm", "start"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, e.g. ads.yourcompany.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  caddydata:
+  caddyconfig:

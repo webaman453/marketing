@@ -1,0 +1,837 @@
+// Ashniva Ads: core data model.
+// Every tenant-owned row carries orgId (directly or via its ad account) so API
+// queries can always be scoped to the caller's organization.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Plan {
+  TRIAL
+  STARTER
+  GROWTH
+  AGENCY
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  ANALYST
+  CLIENT
+}
+
+enum Platform {
+  META
+  GOOGLE
+  TIKTOK
+  LINKEDIN
+  MICROSOFT
+  SNAPCHAT
+  PINTEREST
+}
+
+enum ConnectionMode {
+  LIVE
+  DEMO
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  EXPIRED
+  ERROR
+  REVOKED
+}
+
+enum SyncStatus {
+  IDLE
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum EntityStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+  REMOVED
+}
+
+enum MetricLevel {
+  CAMPAIGN
+  AD_GROUP
+  AD
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum CreativeType {
+  IMAGE
+  VIDEO
+}
+
+enum DraftStatus {
+  DRAFT
+  LAUNCHING
+  LAUNCHED
+  PARTIAL
+  FAILED
+}
+
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum RuleFrequency {
+  HOURLY
+  DAILY
+}
+
+enum RunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+// ───────────────────────── Identity & auth ─────────────────────────
+
+model User {
+  id              String    @id @default(cuid())
+  name            String
+  email           String    @unique
+  passwordHash    String
+  avatarUrl       String?
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  /// Platform operator (Ashniva staff) with access to the super admin panel
+  isSuperAdmin    Boolean   @default(false)
+  /// When this user first started a free trial (and got free AI tokens) by creating an org.
+  /// Orgs they create later start without either, so deleting and re-creating can't reset them.
+  trialUsedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships         Membership[]
+  notifications       Notification[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  invitationsSent     Invitation[]         @relation("InvitedBy")
+  connectionsCreated  PlatformConnection[]
+  auditLogs           AuditLog[]
+  notificationPrefs   NotificationPreference?
+
+  @@map("users")
+}
+
+/// Refresh-token sessions. Tokens are stored as SHA-256 hashes and rotated on every refresh.
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ─────────────────────── Organizations & team ───────────────────────
+
+model Organization {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  plan        Plan      @default(TRIAL)
+  trialEndsAt DateTime?
+
+  // Billing
+  subscriptionStatus    SubscriptionStatus @default(TRIALING)
+  billingProvider       String?
+  billingCustomerId     String?
+  billingSubscriptionId String?            @unique
+  currentPeriodEnd      DateTime?
+
+  // White-label branding used on reports and shared pages
+  brandName    String?
+  brandColor   String?
+  brandLogoUrl String?
+  /// Storage key of brandLogoUrl, so a replaced or removed logo can be deleted
+  brandLogoKey String?
+  reportFooter String?
+
+  /// Remaining AI tokens (platform-provided AI). Can dip slightly below zero on the last call.
+  aiTokenBalance Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships   Membership[]
+  invitations   Invitation[]
+  workspaces    Workspace[]
+  connections   PlatformConnection[]
+  adAccounts    AdAccount[]
+  auditLogs     AuditLog[]
+  creatives     Creative[]
+  drafts        CampaignDraft[]
+  reports       Report[]
+  rules         Rule[]
+  notifications Notification[]
+  apiKeys       ApiKey[]
+  aiLedger      AiTokenLedger[]
+  aiOrders      AiTokenOrder[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  orgId     String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspaces MembershipWorkspace[]
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+  @@map("memberships")
+}
+
+/// Workspace access for MANAGER / ANALYST / CLIENT roles. OWNER and ADMIN see every workspace.
+model MembershipWorkspace {
+  membershipId String
+  workspaceId  String
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([membershipId, workspaceId])
+  @@map("membership_workspaces")
+}
+
+model Invitation {
+  id           String    @id @default(cuid())
+  orgId        String
+  email        String
+  role         Role
+  workspaceIds String[]
+  tokenHash    String    @unique
+  invitedById  String?
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy User?        @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([email])
+  @@map("invitations")
+}
+
+/// A brand or client. Agencies create one workspace per client.
+model Workspace {
+  id         String    @id @default(cuid())
+  orgId      String
+  name       String
+  slug       String
+  currency   String    @default("INR")
+  timezone   String    @default("Asia/Kolkata")
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  org        Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members    MembershipWorkspace[]
+  adAccounts AdAccount[]
+  auditLogs  AuditLog[]
+  creatives  Creative[]
+  drafts     CampaignDraft[]
+  reports    Report[]
+  rules      Rule[]
+  leads      Lead[]
+
+  @@unique([orgId, slug])
+  @@map("workspaces")
+}
+
+// ───────────────────────── Integrations ─────────────────────────
+
+/// One OAuth login to an ad platform. A single connection can expose many ad accounts.
+model PlatformConnection {
+  id               String           @id @default(cuid())
+  orgId            String
+  platform         Platform
+  mode             ConnectionMode   @default(LIVE)
+  externalUserId   String
+  externalUserName String?
+  /// AES-256-GCM encrypted
+  accessTokenEnc   String?
+  /// AES-256-GCM encrypted
+  refreshTokenEnc  String?
+  tokenExpiresAt   DateTime?
+  scopes           String[]
+  status           ConnectionStatus @default(ACTIVE)
+  syncStatus       SyncStatus       @default(IDLE)
+  lastSyncedAt     DateTime?
+  lastSyncError    String?
+  createdById      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy  User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  adAccounts AdAccount[]
+  syncRuns   SyncRun[]
+
+  leads      Lead[]
+
+  @@unique([orgId, platform, externalUserId])
+  @@index([status])
+  @@map("platform_connections")
+}
+
+model SyncRun {
+  id           String     @id @default(cuid())
+  connectionId String
+  trigger      String
+  status       SyncStatus
+  startedAt    DateTime   @default(now())
+  finishedAt   DateTime?
+  error        String?
+  stats        Json?
+
+  connection PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, startedAt])
+  @@map("sync_runs")
+}
+
+model AdAccount {
+  id           String    @id @default(cuid())
+  orgId        String
+  connectionId String
+  workspaceId  String?
+  platform     Platform
+  externalId   String
+  name         String
+  currency     String
+  timezone     String?
+  /// Raw platform account status, e.g. ACTIVE / DISABLED / UNSETTLED
+  status       String
+  lastSyncedAt DateTime?
+  meta         Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org        Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connection PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  workspace  Workspace?         @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  campaigns  Campaign[]
+  adGroups   AdGroup[]
+  ads        Ad[]
+  metrics    MetricDaily[]
+
+  @@unique([orgId, platform, externalId])
+  @@index([workspaceId])
+  @@index([connectionId])
+  @@map("ad_accounts")
+}
+
+// ───────────────────────── Ads hierarchy ─────────────────────────
+
+model Campaign {
+  id                String       @id @default(cuid())
+  adAccountId       String
+  platform          Platform
+  externalId        String
+  name              String
+  status            EntityStatus
+  /// Platform-specific delivery state, e.g. IN_REVIEW, LIMITED, LEARNING
+  deliveryStatus    String?
+  objective         String?
+  dailyBudget       Decimal?     @db.Decimal(14, 2)
+  lifetimeBudget    Decimal?     @db.Decimal(14, 2)
+  startDate         DateTime?    @db.Date
+  endDate           DateTime?    @db.Date
+  raw               Json?
+  platformUpdatedAt DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  adAccount AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adGroups  AdGroup[]
+  ads       Ad[]
+
+  @@unique([adAccountId, externalId])
+  @@index([adAccountId, status])
+  @@map("campaigns")
+}
+
+model AdGroup {
+  id          String       @id @default(cuid())
+  adAccountId String
+  campaignId  String
+  externalId  String
+  name        String
+  status      EntityStatus
+  dailyBudget Decimal?     @db.Decimal(14, 2)
+  bidStrategy String?
+  targeting   Json?
+  raw         Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  adAccount AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads       Ad[]
+
+  @@unique([adAccountId, externalId])
+  @@index([campaignId])
+  @@map("ad_groups")
+}
+
+model Ad {
+  id           String       @id @default(cuid())
+  adAccountId  String
+  campaignId   String
+  adGroupId    String
+  externalId   String
+  name         String
+  status       EntityStatus
+  headline     String?
+  body         String?
+  thumbnailUrl String?
+  finalUrl     String?
+  raw          Json?
+  /// Creative snapshot (AdPreviewData in @ashniva/shared) used to render placement previews.
+  /// Written by the builder; platform syncs never overwrite it.
+  preview      Json?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  adAccount AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  adGroup   AdGroup   @relation(fields: [adGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([adAccountId, externalId])
+  @@index([adGroupId])
+  @@index([campaignId])
+  @@map("ads")
+}
+
+/// Daily performance per entity. Values are in the ad account's currency.
+/// Planned: monthly range partitioning on `date` once volume requires it.
+model MetricDaily {
+  id              BigInt      @id @default(autoincrement())
+  date            DateTime    @db.Date
+  level           MetricLevel
+  /// Our id of the campaign / ad group / ad this row belongs to
+  entityId        String
+  adAccountId     String
+  campaignId      String
+  platform        Platform
+  impressions     Int         @default(0)
+  clicks          Int         @default(0)
+  spend           Decimal     @default(0) @db.Decimal(14, 2)
+  conversions     Decimal     @default(0) @db.Decimal(14, 2)
+  conversionValue Decimal     @default(0) @db.Decimal(14, 2)
+  videoViews      Int         @default(0)
+  updatedAt       DateTime    @updatedAt
+
+  adAccount AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([level, entityId, date])
+  @@index([adAccountId, level, date])
+  @@index([campaignId, level, date])
+  @@map("metrics_daily")
+}
+
+// ───────────────────────── Leads ─────────────────────────
+
+/// A lead captured by an ad platform's native form (Meta Instant Forms). Campaign and ad
+/// ids are plain strings on purpose: leads must outlive entities that later vanish from a sync.
+model Lead {
+  id           String   @id @default(cuid())
+  orgId        String
+  workspaceId  String
+  connectionId String
+  platform     Platform
+  /// The platform's own lead id
+  externalId   String
+  /// Where it came from on the platform, e.g. "fb" or "ig"
+  source       String?
+  isOrganic    Boolean  @default(false)
+  formId       String?
+  formName     String?
+  pageId       String?
+  campaignId   String?
+  adGroupId    String?
+  adId         String?
+  externalAdId String?
+  campaignName String?
+  adGroupName  String?
+  adName       String?
+  name         String?
+  email        String?
+  phone        String?
+  /// Every answer on the form: question key → values
+  fields       Json
+  /// When the person submitted the form (platform time)
+  createdTime  DateTime
+  createdAt    DateTime @default(now())
+
+  workspace  Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, platform, externalId])
+  @@index([workspaceId, createdTime])
+  @@index([campaignId])
+  @@index([adId])
+  @@map("leads")
+}
+
+// ───────────────────────── Audit ─────────────────────────
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  orgId       String
+  workspaceId String?
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  entityName  String?
+  changes     Json?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+  @@index([entityId])
+  @@map("audit_logs")
+}
+
+// ───────────────────────── Phase 2: create & report ─────────────────────────
+
+/// Image or video in the creative library. `platformAssets` caches uploads per ad account,
+/// e.g. { "<adAccountId>": { "hash": "…" } } for Meta image hashes.
+model Creative {
+  id             String       @id @default(cuid())
+  orgId          String
+  workspaceId    String
+  name           String
+  type           CreativeType
+  mimeType       String
+  sizeBytes      Int
+  width          Int?
+  height         Int?
+  storageKey     String       @unique
+  url            String
+  tags           String[]
+  platformAssets Json?
+  uploadedById   String?
+  createdAt      DateTime     @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("creatives")
+}
+
+/// Campaign builder draft. `payload` follows CampaignBuilderInput in @ashniva/shared;
+/// `results` holds one entry per target ad account after launch.
+model CampaignDraft {
+  id          String      @id @default(cuid())
+  orgId       String
+  workspaceId String
+  name        String
+  status      DraftStatus @default(DRAFT)
+  payload     Json
+  results     Json?
+  createdById String?
+  launchedAt  DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, updatedAt])
+  @@map("campaign_drafts")
+}
+
+/// Saved report. `config` follows ReportConfig in @ashniva/shared.
+model Report {
+  id                 String           @id @default(cuid())
+  orgId              String
+  workspaceId        String
+  name               String
+  description        String?
+  config             Json
+  scheduleFrequency  ReportFrequency?
+  scheduleHour       Int?
+  scheduleDayOfWeek  Int?
+  scheduleDayOfMonth Int?
+  recipients         String[]
+  nextRunAt          DateTime?
+  lastRunAt          DateTime?
+  /// Public read-only link token (white-labelled)
+  shareToken         String?          @unique
+  createdById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      ReportRun[]
+
+  @@index([workspaceId])
+  @@index([nextRunAt])
+  @@map("reports")
+}
+
+model ReportRun {
+  id         String    @id @default(cuid())
+  reportId   String
+  status     RunStatus
+  recipients String[]
+  error      String?
+  createdAt  DateTime  @default(now())
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+  @@map("report_runs")
+}
+
+// ───────────────────────── Phase 3: automation ─────────────────────────
+
+/// If/then automation. `scope`, `conditions` and `actions` follow the Rule* types in @ashniva/shared.
+model Rule {
+  id             String        @id @default(cuid())
+  orgId          String
+  workspaceId    String
+  name           String
+  isActive       Boolean       @default(true)
+  scope          Json
+  conditionLogic String        @default("ALL")
+  conditions     Json
+  actions        Json
+  lookbackDays   Int           @default(3)
+  frequency      RuleFrequency @default(DAILY)
+  cooldownHours  Int           @default(24)
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  createdById    String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      RuleRun[]
+  targets   RuleTarget[]
+
+  @@index([isActive, nextRunAt])
+  @@index([workspaceId])
+  @@map("rules")
+}
+
+model RuleRun {
+  id         String    @id @default(cuid())
+  ruleId     String
+  status     RunStatus
+  dryRun     Boolean   @default(false)
+  evaluated  Int       @default(0)
+  matched    Int       @default(0)
+  /// [{ campaignId, campaignName, values, actions: [{ type, ok, error }] }]
+  details    Json?
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, startedAt])
+  @@map("rule_runs")
+}
+
+/// Last time a rule acted on a campaign, for cooldowns.
+model RuleTarget {
+  ruleId       String
+  campaignId   String
+  lastActionAt DateTime
+
+  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@id([ruleId, campaignId])
+  @@map("rule_targets")
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  orgId       String
+  userId      String
+  workspaceId String?
+  type        String
+  title       String
+  body        String?
+  link        String?
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+/// Which emails a user wants. In-app notifications are always created; a missing row means every email is on.
+model NotificationPreference {
+  userId       String   @id
+  ruleAlerts   Boolean  @default(true)
+  reportCopies Boolean  @default(true)
+  lowAiBalance Boolean  @default(true)
+  syncFailures Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// ───────────────────────── Phase 4: platform ─────────────────────────
+
+/// Public API key. Only a SHA-256 hash is stored; `prefix` identifies it in the UI.
+model ApiKey {
+  id          String    @id @default(cuid())
+  orgId       String
+  name        String
+  prefix      String
+  keyHash     String    @unique
+  lastUsedAt  DateTime?
+  createdById String?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("api_keys")
+}
+
+enum AiLedgerType {
+  FREE_GRANT
+  PURCHASE
+  USAGE
+  ADJUSTMENT
+}
+
+enum AiOrderStatus {
+  CREATED
+  PAID
+  FAILED
+}
+
+/// Every change to an organization's AI token balance. `tokens` is signed:
+/// grants and purchases are positive, usage is negative.
+model AiTokenLedger {
+  id           String       @id @default(cuid())
+  orgId        String
+  type         AiLedgerType
+  tokens       Int
+  balanceAfter Int
+  /// Which AI action used the tokens, e.g. "builder.fill"
+  feature      String?
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  userId       String?
+  workspaceId  String?
+  orderId      String?
+  note         String?
+  createdAt    DateTime     @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("ai_token_ledger")
+}
+
+/// One-time token pack purchase (Razorpay order).
+model AiTokenOrder {
+  id              String        @id @default(cuid())
+  orgId           String
+  packId          String
+  tokens          Int
+  /// Minor units (paise)
+  amount          Int
+  currency        String        @default("INR")
+  status          AiOrderStatus @default(CREATED)
+  providerOrderId String?       @unique
+  paymentId       String?       @unique
+  createdById     String?
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("ai_token_orders")
+}
+
+/// Settings the platform owner manages from the admin console: integration
+/// credentials (encrypted, keyed by env var name) and the price list.
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  secret      Boolean  @default(false)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("platform_settings")
+}

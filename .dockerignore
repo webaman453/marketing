@@ -1,0 +1,14 @@
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+.data
+.env
+.env.*
+!.env.example
+.git
+.claude
+docs
+*.log
+.DS_Store
+packages/db/src/generated
