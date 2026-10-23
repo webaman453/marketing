@@ -81,7 +81,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {org.locked && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-warning/30 bg-warning/10 px-4 py-2 text-center text-sm">
               <span className="font-medium">
-                {org.plan === "TRIAL" ? "Your free trial has ended." : "Your subscription is inactive."}
+                {org.plan === "TRIAL" && org.trialEndsAt
+                  ? "Your free trial has ended."
+                  : org.plan === "TRIAL"
+                    ? "Choose a plan to use this workspace."
+                    : "Your subscription is inactive."}
               </span>
               <span className="text-muted-foreground">Your data is safe and read-only until you choose a plan.</span>
               {org.role === "OWNER" && (

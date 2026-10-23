@@ -22,7 +22,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
               <Link href="/login">Sign in</Link>
             </Button>
             <Button asChild size="sm">
-              <Link href="/signup">Start free trial</Link>
+              <Link href="/signup">Get started</Link>
             </Button>
           </div>
         </div>

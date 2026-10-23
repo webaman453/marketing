@@ -155,6 +155,7 @@ function AdminConsole() {
     enabled: !!allowed,
   });
   const [granting, setGranting] = useState<AdminOrg | null>(null);
+  const [creating, setCreating] = useState(false);
   const failures = useQuery({
     queryKey: ["admin-failures"],
     queryFn: () => api<SyncFailure[]>("/admin/sync-failures"),
@@ -312,7 +313,12 @@ function AdminConsole() {
 
             <Card className="gap-0 overflow-hidden py-0">
               <CardHeader className="border-b py-4">
-                <CardTitle>Organizations</CardTitle>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle>Organizations</CardTitle>
+                  <Button size="sm" onClick={() => setCreating(true)}>
+                    Create account
+                  </Button>
+                </div>
                 <div className="relative mt-2 max-w-sm">
                   <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -500,7 +506,87 @@ function AdminConsole() {
         </Tabs>
       </main>
       <GrantTokensDialog org={granting} onClose={() => setGranting(null)} />
+      <CreateAccountDialog open={creating} onClose={() => setCreating(false)} />
     </div>
+  );
+}
+
+function CreateAccountDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [access, setAccess] = useState<"free" | "paid">("paid");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    try {
+      await api("/admin/accounts", {
+        method: "POST",
+        body: { name, email, password, companyName, access },
+      });
+      toast.success(access === "free" ? "Free account created" : "Account created", {
+        description: access === "free" ? `${email} can use the product without a plan.` : `${email} must choose a plan before making changes.`,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin-orgs"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
+      setName("");
+      setEmail("");
+      setPassword("");
+      setCompanyName("");
+      setAccess("paid");
+      onClose();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create account</DialogTitle>
+          <DialogDescription>You decide whether this organization is free or has to buy a plan.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <FormField id="acct-name" label="Full name">
+            <Input id="acct-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <FormField id="acct-company" label="Organization">
+            <Input id="acct-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+          </FormField>
+          <FormField id="acct-email" label="Email">
+            <Input id="acct-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </FormField>
+          <FormField id="acct-password" label="Password" hint="At least 8 characters, with a letter and a number. Share this with them.">
+            <Input id="acct-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </FormField>
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" variant={access === "paid" ? "default" : "outline"} onClick={() => setAccess("paid")}>
+              Paid
+            </Button>
+            <Button type="button" variant={access === "free" ? "default" : "outline"} onClick={() => setAccess("free")}>
+              Free
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {access === "free"
+              ? "Full access now, no invoice. You can change the plan later from this list."
+              : "They can sign in, but the workspace stays read-only until they choose a plan."}
+          </p>
+        </div>
+        <DialogFooter>
+          <Button onClick={() => void submit()} disabled={busy || name.trim().length < 2 || companyName.trim().length < 2 || !email.includes("@") || password.length < 8}>
+            {busy && <Loader2 className="animate-spin" />}
+            Create
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -2,12 +2,13 @@
  * Super admin (platform operator) endpoints. Mounted at /api/admin behind
  * requireAuth + requireSuperAdmin.
  */
-import { adjustAiTokens, audit, isOrgLocked } from "@ashniva/core";
+import { adjustAiTokens, audit, hashPassword, isOrgLocked } from "@ashniva/core";
 import { prisma, type Prisma } from "@ashniva/db";
 import { PLANS, type PlanId } from "@ashniva/shared";
 import { Router } from "express";
 import { z } from "zod";
-import { notFound, parse } from "../lib/errors";
+import { conflict, notFound, parse } from "../lib/errors";
+import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
 import { adminSettingsRouter } from "./admin-settings.routes";
 
 export const adminRouter = Router();
@@ -84,6 +85,32 @@ const updateOrg = z.object({
   plan: z.enum(["TRIAL", "STARTER", "GROWTH", "AGENCY"]).optional(),
   subscriptionStatus: z.enum(["TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED", "EXPIRED"]).optional(),
   extendTrialDays: z.number().int().min(1).max(90).optional(),
+});
+
+const createAccount = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: z.email().trim().toLowerCase(),
+  password: z.string().min(8).max(128).regex(/[A-Za-z]/, "Password must contain a letter").regex(/[0-9]/, "Password must contain a number"),
+  companyName: z.string().trim().min(2).max(80),
+  access: z.enum(["free", "paid"]),
+});
+
+/** Admin-created customer. Free is complimentary access; paid stays locked until they subscribe. */
+adminRouter.post("/accounts", async (req, res) => {
+  const input = parse(createAccount, req.body);
+  if (await prisma.user.findUnique({ where: { email: input.email } })) {
+    throw conflict("An account with this email already exists.");
+  }
+  const slug = await newOrgSlug(input.companyName);
+  const passwordHash = await hashPassword(input.password);
+  const user = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: { name: input.name, email: input.email, passwordHash, emailVerifiedAt: new Date() },
+    });
+    await createOwnedOrg(tx, created.id, input.companyName, slug, input.access === "free" ? "complimentary" : "unpaid");
+    return created;
+  });
+  res.status(201).json({ id: user.id, email: user.email, access: input.access });
 });
 
 adminRouter.patch("/orgs/:orgId", async (req, res) => {

@@ -118,12 +118,14 @@ export default function BillingPage() {
           <CardTitle className="flex items-center gap-2">
             {PLANS[b.plan].name}
             <Badge variant={b.subscriptionStatus === "ACTIVE" || b.subscriptionStatus === "TRIALING" ? "secondary" : "destructive"}>
-              {STATUS_LABEL[b.subscriptionStatus] ?? b.subscriptionStatus}
+              {trial && !b.trialEndsAt ? "No plan" : (STATUS_LABEL[b.subscriptionStatus] ?? b.subscriptionStatus)}
             </Badge>
           </CardTitle>
           <CardDescription>
             {trial
-              ? b.trialEndsAt && `Free trial ${daysLeft > 0 ? `ends ${longDate(b.trialEndsAt.slice(0, 10))}` : "has ended"} · all features included`
+              ? b.trialEndsAt
+                ? `Free trial ${daysLeft > 0 ? `ends ${longDate(b.trialEndsAt.slice(0, 10))}` : "has ended"} · all features included`
+                : "No plan yet. Choose one below to start using this workspace."
               : b.currentPeriodEnd
                 ? `${b.subscriptionStatus === "CANCELLED" ? "Access until" : "Renews on"} ${longDate(b.currentPeriodEnd.slice(0, 10))} · ${money(PLANS[b.plan].priceMonthly, "INR")}/month`
                 : `${money(PLANS[b.plan].priceMonthly, "INR")}/month`}

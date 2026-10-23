@@ -46,7 +46,7 @@ export default function TermsPage() {
       <section>
         <h2>Trials, plans and payment</h2>
         <p>
-          New organizations receive a free trial. Continued use after the trial requires a paid plan. Plan limits, such
+          Accounts created from the sign-up page need a paid plan before the workspace can be changed. Access granted by the platform operator can be free or paid, as the operator decides. Plan limits, such
           as the number of workspaces or ad accounts, apply as described at the time of purchase.
         </p>
       </section>

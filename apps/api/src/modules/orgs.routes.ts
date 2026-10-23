@@ -21,7 +21,7 @@ import { logger } from "../lib/logger";
 import { esc, sendMail } from "../lib/mailer";
 import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
 import { BILLABLE_STATUSES, cancelSubscription, fetchSubscription, razorpayConfigured } from "../lib/razorpay";
-import { buildMe, loadOrgsForUser, toAuditDTO, toInvitationDTO, toWorkspaceDTO } from "../lib/serialize";
+import { buildMe, isSuperAdmin, loadOrgsForUser, toAuditDTO, toInvitationDTO, toWorkspaceDTO } from "../lib/serialize";
 import { uniqueSlug } from "../lib/slug";
 import { loadOrg, requirePermission } from "../middleware/auth";
 import { aiWalletRouter } from "./ai-wallet.routes";
@@ -35,8 +35,8 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Starts a new organization for a signed-in user who has none, e.g. after
- * deleting their only one. The free trial and AI tokens aren't granted again
- * if the user already had them (see createOwnedOrg).
+ * deleting their only one. Self-serve organizations stay locked until a plan
+ * is paid. A super admin's own organization is complimentary.
  */
 orgsRouter.post("/", async (req, res) => {
   const input = parse(createOrgSchema, req.body);
@@ -46,7 +46,8 @@ orgsRouter.post("/", async (req, res) => {
     // Serialize per user so two quick submits can't both pass the check.
     await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
     if (await tx.membership.count({ where: { userId } })) throw conflict("You're already part of an organization.");
-    await createOwnedOrg(tx, userId, input.companyName, slug);
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    await createOwnedOrg(tx, userId, input.companyName, slug, isSuperAdmin(user) ? "complimentary" : "unpaid");
   });
   res.status(201).json(await buildMe(userId));
 });

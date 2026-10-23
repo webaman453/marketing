@@ -84,6 +84,13 @@ export async function loadOrgsForUser(userId: string): Promise<OrgDTO[]> {
 
 export async function buildMe(userId: string): Promise<MeResponse> {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  // A platform operator's own organizations are never on a customer trial.
+  if (isSuperAdmin(user)) {
+    await prisma.organization.updateMany({
+      where: { plan: "TRIAL", memberships: { some: { userId: user.id, role: "OWNER" } } },
+      data: { plan: "AGENCY", subscriptionStatus: "ACTIVE", trialEndsAt: null },
+    });
+  }
   return { user: toUserDTO(user), orgs: await loadOrgsForUser(userId) };
 }
 

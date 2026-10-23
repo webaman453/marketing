@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { PRICING, registerSchema, type MeResponse, type RegisterInput } from "@ashniva/shared";
+import { registerSchema, type MeResponse, type RegisterInput } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
@@ -14,12 +14,10 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { applyServerErrors } from "@/lib/forms";
 import { qk } from "@/lib/queries";
-import { useCatalog } from "@/lib/catalog";
 
 export default function SignupPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  useCatalog();
   const form = useForm<RegisterInput>({
     resolver: zodResolver(registerSchema),
     defaultValues: { name: "", email: "", password: "", companyName: "" },
@@ -40,10 +38,8 @@ export default function SignupPage() {
   return (
     <>
       <div className="mb-8 space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Start your free trial</h1>
-        <p className="text-sm text-muted-foreground">
-          {PRICING.trialDays > 0 ? `${PRICING.trialDays} days free. ` : ""}No credit card required.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
+        <p className="text-sm text-muted-foreground">Choose a plan after you sign up. The workspace stays read-only until then.</p>
       </div>
       <form onSubmit={onSubmit} className="space-y-4" noValidate>
         {errors.root && (

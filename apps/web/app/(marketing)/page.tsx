@@ -68,7 +68,6 @@ async function loadCatalog(): Promise<Catalog> {
 
 export default async function LandingPage() {
   const catalog = await loadCatalog();
-  const trial = catalog.trialDays;
   return (
     <>
       {/* Hero */}
@@ -95,14 +94,14 @@ export default async function LandingPage() {
             <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button asChild size="lg" className="h-11 px-6">
                 <Link href="/signup">
-                  {trial > 0 ? `Start ${trial}-day free trial` : "Get started"} <ArrowRight />
+                  Get started <ArrowRight />
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className="h-11 bg-card px-6">
                 <Link href="/login">Sign in</Link>
               </Button>
             </div>
-            <p className="mt-4 text-xs text-muted-foreground">No credit card required</p>
+            <p className="mt-4 text-xs text-muted-foreground">Choose a plan to start using your workspace</p>
           </div>
           <div className="mx-auto mt-16 max-w-5xl animate-fade-up [animation-delay:120ms]">
             <ProductPreview />
@@ -181,7 +180,7 @@ export default async function LandingPage() {
             <p className="text-sm font-semibold text-primary">Pricing</p>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Plans that grow with your client list</h2>
             <p className="mt-4 text-lg text-muted-foreground">
-              {trial > 0 ? `Every plan starts with a free ${trial}-day trial of all features.` : "Pick the plan that fits your team."}
+              Pick the plan that fits your team. Sign-up stays read-only until a plan is chosen.
               {catalog.gstPercent > 0 && ` Prices exclude ${catalog.gstPercent}% GST.`}
             </p>
           </div>
@@ -211,7 +210,7 @@ export default async function LandingPage() {
                     ))}
                   </ul>
                   <Button asChild variant={featured ? "default" : "outline"} className="mt-8 w-full">
-                    <Link href="/signup">{trial > 0 ? "Start free trial" : "Get started"}</Link>
+                    <Link href="/signup">Get started</Link>
                   </Button>
                 </div>
               );
@@ -231,7 +230,7 @@ export default async function LandingPage() {
             </p>
             <Button asChild size="lg" className="mt-8 h-11 bg-white px-6 text-[oklch(0.24_0.06_270)] hover:bg-white/90">
               <Link href="/signup">
-                Start free trial <ArrowRight />
+                Get started <ArrowRight />
               </Link>
             </Button>
           </div>

@@ -24,7 +24,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { FormField } from "@/components/form-field";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -364,6 +364,18 @@ function CredentialForm({
       ]),
     ),
   );
+  useEffect(() => {
+    if (!status) return;
+    setValues((prev) => {
+      const next = { ...prev };
+      for (const f of group.fields) {
+        if (f.secret || next[f.key]) continue;
+        next[f.key] = status.fields.find((x) => x.key === f.key)?.display ?? "";
+      }
+      return next;
+    });
+  }, [status, group.fields]);
+
   const [busy, setBusy] = useState<"save" | "test" | "clear" | null>(null);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
     null,
@@ -408,7 +420,19 @@ function CredentialForm({
       applies(f),
   );
 
+  const replacedIdentityWithoutSecret = group.fields.some(
+    (f) => f.secret && current(f.key)?.set && !(values[f.key] ?? "").trim(),
+  ) && group.fields.some(
+    (f) => !f.secret && !f.optional && !f.options && (values[f.key] ?? "").trim() !== (current(f.key)?.display ?? ""),
+  );
+
   async function save(thenTest: boolean) {
+    if (replacedIdentityWithoutSecret) {
+      toast.error("Paste the new secret too", {
+        description: "The App ID changed. Leaving the secret empty keeps the old one, and the new app will not sign in.",
+      });
+      return;
+    }
     setBusy(thenTest ? "test" : "save");
     setResult(null);
     try {

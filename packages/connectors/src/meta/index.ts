@@ -31,13 +31,16 @@ export interface MetaConfig {
   apiVersion: string;
 }
 
-/** The last four let us read Instant Form leads from the Pages this login manages. */
+/**
+ * Permissions a new Meta app can grant without extra use cases.
+ * `leads_retrieval` and `pages_manage_ads` are valid, but Facebook blocks the
+ * login dialog for developers until those use cases are added on the app.
+ * Instant Form leads stay off until the app has them.
+ */
 const SCOPES = [
   "ads_management",
   "ads_read",
   "business_management",
-  "leads_retrieval",
-  "pages_manage_ads",
   "pages_read_engagement",
   "pages_show_list",
 ];

@@ -2,7 +2,6 @@
  * Reads Instant Form leads. Leads belong to Facebook Pages, not ad accounts,
  * and are read with each Page's own token (derived from the login's token).
  */
-import { ConnectorError } from "../errors";
 import type { ExternalLead } from "../types";
 
 type Rec = Record<string, any>;
@@ -15,9 +14,8 @@ export async function metaFetchLeads(all: All, one: One, userToken: string, sinc
   // Say so plainly when the login was connected before lead access was requested.
   const perms = await one("/me/permissions", userToken, {});
   const granted = new Set((perms.data as Rec[] | undefined)?.filter((p) => p.status === "granted").map((p) => String(p.permission)));
-  if (!granted.has("leads_retrieval")) {
-    throw new ConnectorError("PERMISSION_DENIED", "Lead access wasn't granted. Disconnect and reconnect Meta, and accept the Pages and leads permissions.");
-  }
+  // Login no longer asks for this until the Meta app has the leads use case.
+  if (!granted.has("leads_retrieval")) return [];
 
   const pages = await all("/me/accounts", userToken, { fields: "id,name,access_token", limit: 100 });
   const out: ExternalLead[] = [];

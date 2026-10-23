@@ -18,7 +18,8 @@ type OrgBilling = Pick<Organization, "plan" | "trialEndsAt" | "subscriptionStatu
  * or a paid subscription was cancelled/expired and its period is over.
  */
 export function isOrgLocked(org: OrgBilling, now = new Date()): boolean {
-  if (org.plan === "TRIAL") return !!org.trialEndsAt && org.trialEndsAt < now;
+  // A trial with no end date was never granted: the organization must choose a plan.
+  if (org.plan === "TRIAL") return !org.trialEndsAt || org.trialEndsAt < now;
   if (org.subscriptionStatus === "ACTIVE" || org.subscriptionStatus === "PAST_DUE") return false;
   if (org.subscriptionStatus === "CANCELLED" && org.currentPeriodEnd && org.currentPeriodEnd > now) return false;
   return org.subscriptionStatus === "CANCELLED" || org.subscriptionStatus === "EXPIRED";
@@ -29,7 +30,9 @@ export function assertNotLocked(org: OrgBilling) {
     throw new EntitlementError(
       "ORG_LOCKED",
       org.plan === "TRIAL"
-        ? "Your free trial has ended. Choose a plan to keep making changes."
+        ? org.trialEndsAt
+          ? "Your free trial has ended. Choose a plan to keep making changes."
+          : "Choose a plan to start using this workspace."
         : "Your subscription is inactive. Update billing to keep making changes.",
     );
   }

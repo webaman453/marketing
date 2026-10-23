@@ -16,7 +16,7 @@ import { config } from "../config";
 import { badRequest, conflict, HttpError, notFound, parse, unauthorized } from "../lib/errors";
 import { esc, sendMail } from "../lib/mailer";
 import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
-import { buildMe, toUserDTO } from "../lib/serialize";
+import { buildMe, isSuperAdmin, toUserDTO } from "../lib/serialize";
 import { clearSessionCookies, endSession, rotateSession, startSession } from "../lib/session";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middleware/auth";
@@ -48,7 +48,8 @@ authRouter.post("/register", authLimiter, async (req, res) => {
 
   const user = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash } });
-    await createOwnedOrg(tx, user.id, input.companyName, orgSlug);
+    const grant = isSuperAdmin({ email: input.email, isSuperAdmin: false }) ? "complimentary" : "unpaid";
+    await createOwnedOrg(tx, user.id, input.companyName, orgSlug, grant);
     return user;
   });
 

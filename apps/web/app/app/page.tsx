@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { PRICING, createOrgSchema, type CreateOrgInput, type MeResponse } from "@ashniva/shared";
+import { createOrgSchema, type CreateOrgInput, type MeResponse } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -13,7 +13,6 @@ import { FormField } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import { useCatalog } from "@/lib/catalog";
 import { applyServerErrors } from "@/lib/forms";
 import { qk, useMe } from "@/lib/queries";
 
@@ -58,7 +57,7 @@ export default function AppEntry() {
               Start a new organization below, or ask a teammate to invite you to theirs. Invitations arrive by email.
             </p>
           </div>
-          <CreateOrgForm trialUsed={me.data!.user.trialUsed} />
+          <CreateOrgForm />
           <div className="mt-6 text-center">
             <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void signOut()}>
               Sign out
@@ -92,9 +91,8 @@ export default function AppEntry() {
 }
 
 /** Lets a signed-in user with no organization start one (with its first workspace). */
-function CreateOrgForm({ trialUsed }: { trialUsed: boolean }) {
+function CreateOrgForm() {
   const queryClient = useQueryClient();
-  useCatalog();
   const form = useForm<CreateOrgInput>({ resolver: zodResolver(createOrgSchema), defaultValues: { companyName: "" } });
   const { errors, isSubmitting } = form.formState;
 
@@ -120,13 +118,7 @@ function CreateOrgForm({ trialUsed }: { trialUsed: boolean }) {
         id="companyName"
         label="Organization name"
         error={errors.companyName}
-        hint={
-          trialUsed
-            ? "You've already used your free trial, so choose a plan to start using the new organization."
-            : PRICING.trialDays > 0
-              ? `Includes a ${PRICING.trialDays}-day free trial. No credit card required.`
-              : undefined
-        }
+        hint="Choose a plan after you create it. The workspace stays read-only until then."
       >
         <Input id="companyName" autoComplete="organization" placeholder="Acme Media" autoFocus className="h-10" {...form.register("companyName")} />
       </FormField>

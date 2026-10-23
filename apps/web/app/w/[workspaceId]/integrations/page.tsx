@@ -146,7 +146,14 @@ function PlatformsSection() {
 
   return (
     <section className="space-y-3">
-      <SectionTitle title="Ad platforms" description="Sign in once per platform. Your team never has to share passwords." />
+      <SectionTitle
+        title="Ad platforms"
+        description={
+          isOwner
+            ? "Connect signs in with the saved app. Change API keys to throw that app away and paste a new App ID and secret."
+            : "Sign in once per platform. Your team never has to share passwords."
+        }
+      />
       {platforms.isError ? (
         <Card><ErrorState message={platforms.error.message} onRetry={() => platforms.refetch()} /></Card>
       ) : !platforms.data ? (
@@ -219,13 +226,13 @@ function PlatformCard({
           </span>
         ))}
       </div>
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col gap-2">
         {comingSoon ? (
           <Button variant="outline" size="sm" className="w-full" disabled>
             On the roadmap
           </Button>
         ) : !p.configured && onSetUp ? (
-          <Button size="sm" variant="outline" className="w-full" onClick={onSetUp}>
+          <Button size="sm" className="w-full" onClick={onSetUp}>
             <KeyRound /> Add API keys
           </Button>
         ) : !p.configured ? (
@@ -242,10 +249,17 @@ function PlatformCard({
             </TooltipContent>
           </Tooltip>
         ) : (
-          <Button size="sm" variant={connected ? "outline" : "default"} className="w-full" disabled={!canManage || loading} onClick={onConnect}>
-            {loading ? <Loader2 className="animate-spin" /> : <Plug />}
-            {connected ? "Connect another login" : "Connect"}
-          </Button>
+          <>
+            <Button size="sm" variant={connected ? "outline" : "default"} className="w-full" disabled={!canManage || loading} onClick={onConnect}>
+              {loading ? <Loader2 className="animate-spin" /> : <Plug />}
+              {connected ? "Connect another login" : "Connect"}
+            </Button>
+            {onSetUp && (
+              <Button size="sm" variant="ghost" className="w-full" onClick={onSetUp}>
+                <KeyRound /> Change API keys
+              </Button>
+            )}
+          </>
         )}
       </div>
     </Card>
@@ -255,7 +269,7 @@ function PlatformCard({
 // ───────────────────────── Connections ─────────────────────────
 
 function ConnectionsSection() {
-  const { org, workspace, can } = useWorkspace();
+  const { org, workspace, can, me } = useWorkspace();
   const queryClient = useQueryClient();
   const connections = useConnections(org.id);
   const [removing, setRemoving] = useState<ConnectionDTO | null>(null);
@@ -391,6 +405,8 @@ function ConnectionsSection() {
               Its {removing?.adAccountCount} ad {removing?.adAccountCount === 1 ? "account" : "accounts"} and all synced
               campaigns and history will be removed from every workspace. Your campaigns on the platform itself are not
               affected.
+              {me.user.isSuperAdmin &&
+                " The saved App ID and secret stay. To use a different app, click Change API keys on that platform's card, paste the new keys, then Connect."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
