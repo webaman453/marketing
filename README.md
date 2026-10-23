@@ -89,10 +89,10 @@ The app works end to end with sample data today. Real accounts need platform app
 5. Paste the App ID and App secret in Admin → API keys (or `META_APP_ID` / `META_APP_SECRET` in `.env`).
 
 **Google Ads (also covers YouTube)**
-1. In a Google Ads manager (MCC) account, open *API Center* and apply for a developer token (Basic access).
-2. In Google Cloud Console, enable the Google Ads API, configure the OAuth consent screen (scope `https://www.googleapis.com/auth/adwords`) and create a Web OAuth client.
-3. Add the redirect URL `https://<your-domain>/api/oauth/google/callback`.
-4. Paste the client ID, client secret and developer token in Admin → API keys (or the `GOOGLE_*` variables in `.env`).
+1. In Google Cloud Console, create a project and enable the Google Ads API. Enabling it gives Test access, which only reaches Google's test accounts.
+2. On that project's Google Ads API overview page, apply for Explorer access for real ad accounts (2,880 operations a day). For 15,000 a day, complete brand verification and apply for Basic access. API Center in a Google Ads manager account no longer issues developer tokens.
+3. Configure the OAuth consent screen (scope `https://www.googleapis.com/auth/adwords`) and create a Web OAuth client. Add the redirect URL `https://<your-domain>/api/oauth/google/callback` (local: `http://localhost:3100/api/oauth/google/callback`).
+4. Paste the client ID and client secret in Admin → API keys (or `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env`). Leave the developer token empty.
 
 **TikTok, LinkedIn, Microsoft, Snapchat, Pinterest**: register a developer app on each platform's marketing API portal, set its OAuth redirect to `https://<your-domain>/api/oauth/<platform>/callback` (`tiktok`, `linkedin`, `microsoft`, `snapchat`, `pinterest`), then add its keys in Admin → API keys (or the matching variables from `.env.example`). These connectors follow each platform's published API and need a final check against a real account once access is approved.
 

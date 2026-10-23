@@ -78,7 +78,7 @@ export default function ApiKeysPage() {
           <Link href={`/w/${workspace.id}/integrations`} className="font-medium text-primary hover:underline">Integrations</Link>.
           {me.user.isSuperAdmin && (
             <>
-              {" "}Platform app keys (Meta App ID, Google developer token…) go in{" "}
+              {" "}Platform app keys (Meta App ID, Google OAuth client…) go in{" "}
               <Link href="/admin?tab=keys" className="font-medium text-primary hover:underline">Admin → API keys</Link>.
             </>
           )}

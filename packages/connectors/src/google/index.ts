@@ -3,8 +3,9 @@
  * Performance Max and YouTube video campaigns.
  * Docs: https://developers.google.com/google-ads/api/rest/overview
  *
- * Requires an approved developer token plus an OAuth client with the
- * https://www.googleapis.com/auth/adwords scope.
+ * Access follows the Google Cloud project that owns the OAuth client
+ * (scope https://www.googleapis.com/auth/adwords). Developer tokens were
+ * sunset on 9 September 2026: a saved token is still sent, and ignored.
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { googleBuilderOptions, googleCreateCampaign, googleSearchTargeting, type GoogleApi } from "./builder";
@@ -55,7 +56,7 @@ export class GoogleAdsConnector implements AdPlatformConnector {
   constructor(private readonly config: GoogleConfig) {}
 
   isConfigured() {
-    return Boolean(this.config.clientId && this.config.clientSecret && this.config.developerToken);
+    return Boolean(this.config.clientId && this.config.clientSecret);
   }
 
   private assertConfigured() {
@@ -83,8 +84,9 @@ export class GoogleAdsConnector implements AdPlatformConnector {
   private ads<T>(path: string, auth: ConnectorAuth, opts: RequestOptions & { loginCustomerId?: string } = {}) {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${auth.accessToken}`,
-      "developer-token": this.config.developerToken ?? "",
     };
+    // Optional. Google ignores this header and will reject it in a future API version.
+    if (this.config.developerToken) headers["developer-token"] = this.config.developerToken;
     if (opts.loginCustomerId) headers["login-customer-id"] = opts.loginCustomerId;
     return requestJson<T>(
       `https://googleads.googleapis.com/${this.config.apiVersion}${path}`,
