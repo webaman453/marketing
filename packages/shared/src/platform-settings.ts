@@ -40,6 +40,7 @@ export type CredentialGroupId =
   | "OUTBRAIN"
   | "TRADEDESK"
   | "YAHOO"
+  | "SHOPIFY"
   | "AI"
   | "RAZORPAY"
   | "EMAIL";
@@ -374,6 +375,25 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     fields: [
       { key: "YAHOO_CLIENT_ID", label: "Client ID" },
       { key: "YAHOO_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "SHOPIFY",
+    title: "Shopify",
+    kind: "platform",
+    platform: "SHOPIFY",
+    purpose: "Lets a store connect and save marketing events with UTM tags.",
+    consoleUrl: "https://dev.shopify.com/dashboard",
+    consoleLabel: "Shopify Dev Dashboard",
+    steps: [
+      "Create an app and copy its Client ID and Client secret.",
+      "Add the redirect URL below under Allowed redirection URLs.",
+      "On Connect, enter that store's your-store.myshopify.com domain.",
+    ],
+    needsRedirectUrl: true,
+    fields: [
+      { key: "SHOPIFY_CLIENT_ID", label: "Client ID" },
+      { key: "SHOPIFY_CLIENT_SECRET", label: "Client secret", secret: true },
     ],
   },
   {

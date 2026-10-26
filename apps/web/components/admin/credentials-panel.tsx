@@ -3,6 +3,7 @@
 import {
   CREDENTIAL_GROUPS,
   credentialFieldApplies,
+  isPlatformShown,
   credentialValue,
   type CredentialField,
   type CredentialGroup,
@@ -105,7 +106,7 @@ export function CredentialsPanel({
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {CREDENTIAL_GROUPS.filter((g) =>
-              section.kinds.includes(g.kind),
+              section.kinds.includes(g.kind) && (!g.platform || isPlatformShown(g.platform)),
             ).map((g) => {
               const status = creds.data?.groups.find((s) => s.id === g.id);
               return (

@@ -79,6 +79,10 @@ export function connectors(): ConnectorRegistry {
       clientId: process.env.YAHOO_CLIENT_ID || undefined,
       clientSecret: process.env.YAHOO_CLIENT_SECRET || undefined,
     },
+    shopify: {
+      clientId: process.env.SHOPIFY_CLIENT_ID || undefined,
+      clientSecret: process.env.SHOPIFY_CLIENT_SECRET || undefined,
+    },
   });
   return registry;
 }

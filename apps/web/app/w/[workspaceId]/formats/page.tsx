@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORMS, PLATFORM_INFO, isPlatform, type Platform } from "@ashniva/shared";
+import { PLATFORMS, PLATFORM_INFO, VISIBLE_PLATFORMS, isPlatform, isPlatformShown, type Platform } from "@ashniva/shared";
 import { ArrowLeft } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -14,10 +14,11 @@ import { useWorkspaceAdAccounts } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 const GROUPS: { label: string; ids: Platform[] }[] = [
-  { label: "Social", ids: ["META", "TIKTOK", "SNAPCHAT", "X", "LINKEDIN", "PINTEREST"] },
+  { label: "Social", ids: ["META", "SNAPCHAT", "X", "LINKEDIN", "PINTEREST"] },
   { label: "Search and shopping", ids: ["GOOGLE", "MICROSOFT", "AMAZON", "APPLE"] },
   { label: "Native", ids: ["TABOOLA", "OUTBRAIN"] },
   { label: "Audio and programmatic", ids: ["SPOTIFY", "CRITEO", "YAHOO", "TRADEDESK"] },
+  { label: "Stores and hiring", ids: ["SHOPIFY"] },
 ];
 
 export default function AdFormatsPage() {
@@ -31,7 +32,7 @@ export default function AdFormatsPage() {
 function AdFormats() {
   const params = useSearchParams();
   const requested = params.get("platform");
-  if (isPlatform(requested)) return <PlatformForm platform={requested} />;
+  if (isPlatform(requested) && isPlatformShown(requested)) return <PlatformForm platform={requested} />;
   return <PlatformGallery />;
 }
 
@@ -48,7 +49,7 @@ function PlatformGallery() {
         title="Ad formats"
         description="Choose a platform. The next screen is that platform's own form, with the same ad types it uses in its ads manager."
       />
-      {[...GROUPS, { label: "More", ids: PLATFORMS.filter((platform) => !GROUPS.some((group) => group.ids.includes(platform))) }].filter((group) => group.ids.length > 0).map((group) => (
+      {[...GROUPS, { label: "More", ids: VISIBLE_PLATFORMS.filter((platform) => !GROUPS.some((group) => group.ids.includes(platform))) }].filter((group) => group.ids.some(isPlatformShown)).map((group) => (
         <section key={group.label} className="space-y-3">
           <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{group.label}</h2>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">

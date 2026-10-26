@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformShown } from "@ashniva/shared";
 import { History, LayoutDashboard, Megaphone, Moon, Plug, Search, Settings, Sun, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -85,7 +86,7 @@ export function CommandMenu() {
             <>
               <CommandSeparator />
               <CommandGroup heading="Campaigns">
-                {campaigns.data.campaigns.slice(0, 50).map((c) => (
+                {campaigns.data.campaigns.filter((c) => isPlatformShown(c.platform)).slice(0, 50).map((c) => (
                   <CommandItem key={c.id} value={`${c.name} ${c.platform}`} onSelect={() => go(`${base}/campaigns/${c.id}`)}>
                     <PlatformIcon platform={c.platform} size="xs" />
                     <span className="truncate">{c.name}</span>

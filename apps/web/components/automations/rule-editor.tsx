@@ -6,6 +6,7 @@ import {
   OPERATOR_LABELS,
   PLATFORM_INFO,
   RULE_ACTIONS,
+  isPlatformShown,
   RULE_METRICS,
   RULE_OPERATORS,
   RULE_TEMPLATES,
@@ -73,7 +74,7 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
   const [preview, setPreview] = useState<RuleRunDTO | null>(null);
   const [campaignSearch, setCampaignSearch] = useState("");
 
-  const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))], [accounts.data]);
+  const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))].filter(isPlatformShown), [accounts.data]);
   const currency = workspace.currency;
   const set = (patch: Partial<RuleInput>) => setForm((f) => ({ ...f, ...patch }));
   const setCondition = (i: number, patch: Partial<RuleCondition>) =>
@@ -132,7 +133,7 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
   }
 
   const campaignOptions = (campaigns.data?.campaigns ?? []).filter(
-    (c) => (form.scope.platforms.length === 0 || form.scope.platforms.includes(c.platform)) && c.name.toLowerCase().includes(campaignSearch.toLowerCase()),
+    (c) => isPlatformShown(c.platform) && (form.scope.platforms.length === 0 || form.scope.platforms.includes(c.platform)) && c.name.toLowerCase().includes(campaignSearch.toLowerCase()),
   );
 
   return (

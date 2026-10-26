@@ -1,4 +1,4 @@
-import { BRAND, PLATFORM_INFO, PLATFORMS } from "@ashniva/shared";
+import { BRAND, PLATFORM_INFO, VISIBLE_PLATFORMS } from "@ashniva/shared";
 import { CheckCircle2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { Logo } from "@/components/brand";
@@ -38,7 +38,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgb(255_255_255/0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgb(255_255_255/0.04)_1px,transparent_1px)] bg-[size:44px_44px] [mask-image:radial-gradient(ellipse_at_center,black_40%,transparent_80%)]" />
         <div className="relative z-10 flex w-full flex-col justify-between p-12 text-white xl:p-16">
           <div className="flex flex-wrap gap-2">
-            {PLATFORMS.map((p) => (
+            {VISIBLE_PLATFORMS.map((p) => (
               <span
                 key={p}
                 className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] py-1 pr-3 pl-1 text-xs text-white/80 backdrop-blur"

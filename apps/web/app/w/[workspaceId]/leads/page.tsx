@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORMS, PLATFORM_INFO, isPlatform, type LeadDTO, type Platform } from "@ashniva/shared";
+import { PLATFORMS, PLATFORM_INFO, isPlatform, isPlatformShown, type LeadDTO, type Platform } from "@ashniva/shared";
 import { ArrowLeft, ChevronLeft, ChevronRight, Clock, Contact, Download, Mail, Phone, Search, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -23,10 +23,11 @@ import { useLeads } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
 const GROUPS: { label: string; ids: Platform[] }[] = [
-  { label: "Social", ids: ["META", "TIKTOK", "SNAPCHAT", "X", "LINKEDIN", "PINTEREST"] },
+  { label: "Social", ids: ["META", "SNAPCHAT", "X", "LINKEDIN", "PINTEREST"] },
   { label: "Search and shopping", ids: ["GOOGLE", "MICROSOFT", "AMAZON", "APPLE"] },
   { label: "Native", ids: ["TABOOLA", "OUTBRAIN"] },
   { label: "Audio and programmatic", ids: ["SPOTIFY", "CRITEO", "YAHOO", "TRADEDESK"] },
+  { label: "Stores and hiring", ids: ["SHOPIFY"] },
 ];
 
 const SOURCES: Record<string, string> = { fb: "Facebook", ig: "Instagram", an: "Audience Network", ms: "Messenger", unknown: "Other" };
@@ -62,7 +63,7 @@ export default function LeadsPage() {
 function Leads() {
   const params = useSearchParams();
   const requested = params.get("platform");
-  if (isPlatform(requested)) return <PlatformLeads key={requested} platform={requested} />;
+  if (isPlatform(requested) && isPlatformShown(requested)) return <PlatformLeads key={requested} platform={requested} />;
   return <PlatformGallery />;
 }
 

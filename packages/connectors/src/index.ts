@@ -16,6 +16,7 @@ import { SpotifyAdsConnector, type SpotifyConfig } from "./spotify";
 import { TaboolaConnector, type TaboolaConfig } from "./taboola";
 import { TradeDeskConnector, type TradeDeskConfig } from "./tradedesk";
 import { XAdsConnector, type XConfig } from "./x";
+import { ShopifyConnector, type ShopifyConfig } from "./shopify";
 import { YahooDspConnector, type YahooConfig } from "./yahoo";
 import type { AdPlatformConnector } from "./types";
 
@@ -36,6 +37,7 @@ export { CriteoConnector } from "./criteo";
 export { TaboolaConnector } from "./taboola";
 export { OutbrainConnector } from "./outbrain";
 export { TradeDeskConnector } from "./tradedesk";
+export { ShopifyConnector } from "./shopify";
 export { YahooDspConnector } from "./yahoo";
 export { DemoConnector, DEMO_ACCOUNTS, DEMO_PLATFORMS, generateDemoMetrics, generateDemoStructure } from "./demo";
 
@@ -56,6 +58,7 @@ export interface ConnectorsConfig {
   outbrain: OutbrainConfig;
   tradedesk: TradeDeskConfig;
   yahoo: YahooConfig;
+  shopify: ShopifyConfig;
 }
 
 export interface ConnectorRegistry {
@@ -84,6 +87,7 @@ export function createConnectorRegistry(config: ConnectorsConfig): ConnectorRegi
     OUTBRAIN: new OutbrainConnector(config.outbrain),
     TRADEDESK: new TradeDeskConnector(config.tradedesk),
     YAHOO: new YahooDspConnector(config.yahoo),
+    SHOPIFY: new ShopifyConnector(config.shopify),
   };
   const demo = new Map<Platform, DemoConnector>();
 

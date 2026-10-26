@@ -13,6 +13,7 @@ import { prisma, type AdAccount, type PlatformConnection, type Prisma } from "@a
 import {
   PLATFORM_INFO,
   PLATFORMS,
+  isPlatformShown,
   assignAdAccountSchema,
   hasAllWorkspaceAccess,
   platformParam,
@@ -83,7 +84,7 @@ integrationsRouter.get("/platforms", (_req, res) => {
   const registry = connectors();
   const live = new Set(registry.livePlatforms());
   res.json(
-    PLATFORMS.map((p) => ({
+    PLATFORMS.filter(isPlatformShown).map((p) => ({
       ...PLATFORM_INFO[p],
       supported: live.has(p),
       configured: registry.isConfigured(p),
@@ -102,18 +103,29 @@ integrationsRouter.get("/connections", async (req, res) => {
   res.json(list.map(toConnectionDTO));
 });
 
-const authorizeBody = z.object({ workspaceId: z.string().min(1) });
+const authorizeBody = z.object({ workspaceId: z.string().min(1), shop: z.string().trim().optional() });
+
+/** "your-store", a URL, or your-store.myshopify.com. */
+function shopifyDomain(raw: string) {
+  let shop = raw.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0] ?? "";
+  if (shop && !shop.includes(".")) shop = `${shop}.myshopify.com`;
+  if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
+    throw badRequest("Enter the store domain, like your-store.myshopify.com.");
+  }
+  return shop;
+}
 
 /** Returns the platform's OAuth consent URL. The state token carries who/where to attach the connection. */
 integrationsRouter.post("/connections/:platform/authorize", requirePermission("integrations:manage"), async (req, res) => {
   assertNotLocked(req.org!);
   const platform = parse(platformParam, String(req.params.platform).toUpperCase());
-  const { workspaceId } = parse(authorizeBody, req.body);
+  const { workspaceId, shop: shopInput } = parse(authorizeBody, req.body);
   const ws = await prisma.workspace.findFirst({ where: { id: workspaceId, orgId: req.org!.id, archivedAt: null } });
   if (!ws) throw notFound("Workspace");
+  const shop = platform === "SHOPIFY" ? shopifyDomain(shopInput ?? "") : undefined;
 
   const state = jwt.sign(
-    { orgId: req.org!.id, userId: req.userId, workspaceId, platform },
+    { orgId: req.org!.id, userId: req.userId, workspaceId, platform, ...(shop ? { shop } : {}) },
     config().OAUTH_STATE_SECRET,
     { expiresIn: "15m", issuer: "ashniva-oauth" },
   );
@@ -219,6 +231,7 @@ interface OAuthState {
   userId: string;
   workspaceId: string;
   platform: Platform;
+  shop?: string;
 }
 
 /**

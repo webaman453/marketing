@@ -1,6 +1,6 @@
 "use client";
 
-import { BUILDER_SPECS, PLATFORMS, PLATFORM_INFO, newDraft, setupOptions, type BuilderDraft, type Platform, type Values } from "@ashniva/shared";
+import { BUILDER_SPECS, VISIBLE_PLATFORMS, PLATFORM_INFO, newDraft, setupOptions, type BuilderDraft, type Platform, type Values } from "@ashniva/shared";
 import { ArrowRight, Link2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -47,11 +47,20 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
       <div className="space-y-8 p-6 sm:p-8">
         {locked && platform && platformAccounts.length === 0 && (
           <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
-            <div className="font-medium">Connect {PLATFORM_INFO[platform].name} to publish this form.</div>
-            <p className="mt-0.5 text-muted-foreground">The fields below are the same ones {PLATFORM_INFO[platform].name} asks for. Connect an account in this workspace when you are ready to create the ad.</p>
-            <Button asChild size="sm" className="mt-3" variant="outline">
-              <Link href={`/w/${workspace.id}/integrations`}><Link2 /> Connect {PLATFORM_INFO[platform].name}</Link>
-            </Button>
+            {PLATFORM_INFO[platform].availability === "coming_soon" ? (
+              <>
+                <div className="font-medium">{PLATFORM_INFO[platform].name} cannot be connected from here yet.</div>
+                <p className="mt-0.5 text-muted-foreground">The fields below match their own screen. They have not opened an API, so this form cannot publish the ad.</p>
+              </>
+            ) : (
+              <>
+                <div className="font-medium">Connect {PLATFORM_INFO[platform].name} to publish this form.</div>
+                <p className="mt-0.5 text-muted-foreground">The fields below are the same ones {PLATFORM_INFO[platform].name} asks for. Connect an account in this workspace when you are ready to create the ad.</p>
+                <Button asChild size="sm" className="mt-3" variant="outline">
+                  <Link href={`/w/${workspace.id}/integrations`}><Link2 /> Connect {PLATFORM_INFO[platform].name}</Link>
+                </Button>
+              </>
+            )}
           </div>
         )}
         {!locked && (
@@ -61,7 +70,7 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
             <p className="text-sm text-muted-foreground">You&apos;ll get the same options as in each platform&apos;s own ads manager.</p>
           </div>
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-            {PLATFORMS.map((p) => {
+            {VISIBLE_PLATFORMS.map((p) => {
               const count = byPlatform(p).length;
               const active = platform === p;
               return (

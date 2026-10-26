@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORM_INFO, type AuditLogDTO, type CampaignRowDTO } from "@ashniva/shared";
+import { PLATFORM_INFO, isPlatformShown, type AuditLogDTO, type CampaignRowDTO } from "@ashniva/shared";
 import { ArrowLeft, Eye, History, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -57,6 +57,16 @@ export default function CampaignDetailPage() {
   if (!query.data) return <DetailSkeleton back={back} />;
 
   const { campaign: c, timeseries, adGroups, ads, activity } = query.data;
+  if (!isPlatformShown(c.platform)) {
+    return (
+      <div className="space-y-6">
+        {back}
+        <Card>
+          <EmptyState icon={Eye} title="This campaign is not available" description="It belongs to a platform that is not shown in this workspace." />
+        </Card>
+      </div>
+    );
+  }
   const terms = PLATFORM_INFO[c.platform].terms;
   // Some platforms keep the budget on each ad group instead of the campaign.
   const groupBudget = adGroups.reduce((sum, g) => sum + (g.dailyBudget ?? 0), 0);

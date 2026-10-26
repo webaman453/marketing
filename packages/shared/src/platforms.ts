@@ -15,6 +15,10 @@ export const PLATFORMS = [
   "OUTBRAIN",
   "TRADEDESK",
   "YAHOO",
+  "SHOPIFY",
+  "SWIGGY",
+  "ZEPTO",
+  "NAUKRI",
 ] as const;
 
 export type Platform = (typeof PLATFORMS)[number];
@@ -180,7 +184,50 @@ export const PLATFORM_INFO: Record<Platform, PlatformInfo> = {
     availability: "live",
     terms: { campaign: "Campaign", adGroup: "Line", ad: "Ad" },
   },
+  SHOPIFY: {
+    id: "SHOPIFY",
+    name: "Shopify",
+    description: "Connect a store and record its marketing campaign, budget and UTM tags. Shopify does not serve the ad.",
+    channels: ["Store", "UTM tracking"],
+    color: "#008060",
+    availability: "live",
+    terms: { campaign: "Marketing event", adGroup: "Tracking", ad: "Landing page" },
+  },
+  SWIGGY: {
+    id: "SWIGGY",
+    name: "Swiggy Ads",
+    description: "Food, Instamart and Dineout ads use the Swiggy partner portal. Swiggy has no public ads API, so this cannot connect or publish.",
+    channels: ["Food", "Instamart", "Dineout"],
+    color: "#FC8019",
+    availability: "coming_soon",
+    terms: { campaign: "Campaign", adGroup: "City", ad: "Products" },
+  },
+  ZEPTO: {
+    id: "ZEPTO",
+    name: "Zepto Ads",
+    description: "Sponsored products for brands that already sell on Zepto. Zepto has no public ads API, so this cannot connect or publish.",
+    channels: ["Sponsored products"],
+    color: "#6C0BA9",
+    availability: "coming_soon",
+    terms: { campaign: "Campaign", adGroup: "Targeting", ad: "SKU" },
+  },
+  NAUKRI: {
+    id: "NAUKRI",
+    name: "Naukri.com",
+    description: "Hot vacancy and classified job posts. Naukri's job API is partner-only and not open to publish from here.",
+    channels: ["Hot vacancy", "Classified"],
+    color: "#1B4F9C",
+    availability: "coming_soon",
+    terms: { campaign: "Job", adGroup: "Location", ad: "Posting" },
+  },
 };
 
 export const isPlatform = (value: unknown): value is Platform =>
   typeof value === "string" && (PLATFORMS as readonly string[]).includes(value);
+
+/** Still implemented, but not listed in the app. */
+const HIDDEN_PLATFORMS = new Set<Platform>(["TIKTOK", "SWIGGY", "ZEPTO", "NAUKRI"]);
+
+export const isPlatformShown = (platform: Platform) => !HIDDEN_PLATFORMS.has(platform);
+
+export const VISIBLE_PLATFORMS = PLATFORMS.filter(isPlatformShown);

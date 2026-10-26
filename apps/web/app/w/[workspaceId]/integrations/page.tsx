@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORM_INFO, credentialGroupFor, type ConnectionDTO, type CredentialGroupId, type Platform } from "@ashniva/shared";
+import { PLATFORM_INFO, credentialGroupFor, isPlatformShown, type ConnectionDTO, type CredentialGroupId, type Platform } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -37,6 +37,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,20 +129,31 @@ function PlatformsSection() {
   const connections = useConnections(org.id);
   const [connecting, setConnecting] = useState<Platform | null>(null);
   const [settingUp, setSettingUp] = useState<CredentialGroupId | null>(null);
+  const [shopOpen, setShopOpen] = useState(false);
+  const [shop, setShop] = useState("");
   const isOwner = me.user.isSuperAdmin;
 
-  async function connect(p: Platform) {
+  async function connect(p: Platform, extra?: { shop?: string }) {
     setConnecting(p);
     try {
       const { url } = await api<{ url: string }>(`/orgs/${org.id}/connections/${p.toLowerCase()}/authorize`, {
         method: "POST",
-        body: { workspaceId: workspace.id },
+        body: { workspaceId: workspace.id, ...extra },
       });
       window.location.assign(url);
     } catch (err) {
       toastError(err);
       setConnecting(null);
     }
+  }
+
+  function startConnect(p: Platform) {
+    if (p === "SHOPIFY") {
+      setShop("");
+      setShopOpen(true);
+      return;
+    }
+    void connect(p);
   }
 
   const liveCount = (p: Platform) =>
@@ -177,7 +191,7 @@ function PlatformsSection() {
               connected={liveCount(p.id)}
               canManage={can("integrations:manage")}
               loading={connecting === p.id}
-              onConnect={() => connect(p.id)}
+              onConnect={() => startConnect(p.id)}
               onSetUp={isOwner ? () => setSettingUp(credentialGroupFor(p.id)?.id ?? null) : undefined}
               style={{ animationDelay: `${i * 35}ms` }}
             />
@@ -185,6 +199,31 @@ function PlatformsSection() {
         </div>
       )}
       {isOwner && <CredentialDialog groupId={settingUp} onClose={() => setSettingUp(null)} />}
+      <Dialog open={shopOpen} onOpenChange={setShopOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect Shopify</DialogTitle>
+            <DialogDescription>Enter the store you want to record campaigns for. You will then approve the app on Shopify.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="shopify-shop">Store domain</Label>
+            <Input id="shopify-shop" value={shop} placeholder="your-store.myshopify.com" onChange={(e) => setShop(e.target.value)} autoComplete="off" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShopOpen(false)}>Cancel</Button>
+            <Button
+              disabled={!shop.trim() || connecting === "SHOPIFY"}
+              onClick={() => {
+                setShopOpen(false);
+                void connect("SHOPIFY", { shop: shop.trim() });
+              }}
+            >
+              {connecting === "SHOPIFY" ? <Loader2 className="animate-spin" /> : <Plug />}
+              Continue to Shopify
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -338,6 +377,8 @@ function ConnectionsSection() {
     }
   }
 
+  const shownConnections = connections.data?.filter((c) => isPlatformShown(c.platform));
+
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -354,11 +395,11 @@ function ConnectionsSection() {
           <ErrorState message={connections.error.message} onRetry={() => connections.refetch()} />
         ) : !connections.data ? (
           <div className="space-y-2 p-4">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
-        ) : connections.data.length === 0 ? (
+        ) : shownConnections!.length === 0 ? (
           <EmptyState icon={Unplug} title="No connections yet" description="Connect a platform above to start syncing campaigns and performance data." />
         ) : (
           <ul className="divide-y">
-            {connections.data.map((c) => (
+            {shownConnections!.map((c) => (
               <li key={c.id} className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   <PlatformIcon platform={c.platform} size="md" />
@@ -494,7 +535,8 @@ function AdAccountsSection() {
     }
   }
 
-  if (accounts.data && accounts.data.length === 0) return null;
+  const shownAccounts = accounts.data?.filter((a) => isPlatformShown(a.platform));
+  if (accounts.data && shownAccounts!.length === 0) return null;
 
   return (
     <section className="space-y-3">
@@ -517,7 +559,7 @@ function AdAccountsSection() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {accounts.data.map((a) => (
+              {shownAccounts!.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell className="pl-4">
                     <div className="flex items-center gap-2.5">

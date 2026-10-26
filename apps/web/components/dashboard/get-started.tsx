@@ -88,7 +88,7 @@ export function GetStarted() {
             </p>
           </div>
           <div className="flex -space-x-1.5">
-            {(["META", "GOOGLE", "TIKTOK", "LINKEDIN", "MICROSOFT"] as const).map((p) => (
+            {(["META", "GOOGLE", "LINKEDIN", "MICROSOFT", "SNAPCHAT"] as const).map((p) => (
               <PlatformIcon key={p} platform={p} size="lg" className="rounded-full ring-2 ring-card" />
             ))}
           </div>

@@ -50,6 +50,12 @@ function defaultPlacements(platform: Platform, objective: string | null): Placem
     case "TRADEDESK":
     case "YAHOO":
       return o.includes("VIDEO") ? ["youtube_instream"] : o.includes("NATIVE") ? ["google_display_native"] : ["google_display"];
+    case "SHOPIFY":
+    case "SWIGGY":
+    case "ZEPTO":
+      return ["google_display"];
+    case "NAUKRI":
+      return ["linkedin_feed"];
   }
 }
 

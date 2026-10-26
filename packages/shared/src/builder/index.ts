@@ -14,7 +14,11 @@ import { spotifySpec } from "./specs/spotify";
 import { taboolaSpec } from "./specs/taboola";
 import { tradeDeskSpec } from "./specs/tradedesk";
 import { xSpec } from "./specs/x";
+import { naukriSpec } from "./specs/naukri";
+import { shopifySpec } from "./specs/shopify";
+import { swiggySpec } from "./specs/swiggy";
 import { yahooSpec } from "./specs/yahoo";
+import { zeptoSpec } from "./specs/zepto";
 import type { PlatformBuilderSpec } from "./types";
 
 export * from "./types";
@@ -47,6 +51,10 @@ export const BUILDER_SPECS: Record<Platform, PlatformBuilderSpec> = {
   OUTBRAIN: outbrainSpec,
   TRADEDESK: tradeDeskSpec,
   YAHOO: yahooSpec,
+  SHOPIFY: shopifySpec,
+  SWIGGY: swiggySpec,
+  ZEPTO: zeptoSpec,
+  NAUKRI: naukriSpec,
 };
 
 export const builderSpec = (platform: Platform) => BUILDER_SPECS[platform];

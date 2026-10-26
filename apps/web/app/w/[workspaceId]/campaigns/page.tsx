@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORM_INFO, type EntityStatus, type Platform } from "@ashniva/shared";
+import { PLATFORM_INFO, isPlatformShown, type EntityStatus, type Platform } from "@ashniva/shared";
 import { Megaphone, Plug, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
@@ -38,14 +38,18 @@ export default function CampaignsPage() {
     search: deferredSearch || undefined,
   });
 
-  const platforms = useMemo(
-    () => [...new Set((accounts.data ?? []).map((a) => a.platform))],
+  const shownAccounts = useMemo(
+    () => (accounts.data ?? []).filter((a) => isPlatformShown(a.platform)),
     [accounts.data],
+  );
+  const platforms = useMemo(
+    () => [...new Set(shownAccounts.map((a) => a.platform))],
+    [shownAccounts],
   );
   const filtered = search !== "" || platform !== ALL || status !== ALL || adAccountId !== ALL;
   const data = campaigns.data;
 
-  if (accounts.data && accounts.data.length === 0) {
+  if (accounts.data && shownAccounts.length === 0) {
     return (
       <div className="space-y-6">
         <PageHeader title="Campaigns" description="Every campaign from every connected platform." />
@@ -139,14 +143,14 @@ export default function CampaignsPage() {
                 <SelectItem value="ARCHIVED">Archived</SelectItem>
               </SelectContent>
             </Select>
-            {(accounts.data?.length ?? 0) > 1 && (
+            {shownAccounts.length > 1 && (
               <Select value={adAccountId} onValueChange={setAdAccountId}>
                 <SelectTrigger size="sm" className="w-[200px]">
                   <SelectValue placeholder="Ad account" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>All ad accounts</SelectItem>
-                  {accounts.data?.map((a) => (
+                  {shownAccounts.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
                       <PlatformIcon platform={a.platform} size="xs" />
                       <span className="truncate">{a.name}</span>
@@ -181,7 +185,7 @@ export default function CampaignsPage() {
               <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
-        ) : data.campaigns.length === 0 ? (
+        ) : data.campaigns.filter((c) => isPlatformShown(c.platform)).length === 0 ? (
           <EmptyState
             icon={Megaphone}
             title={filtered ? "No campaigns match these filters" : "No campaigns yet"}
@@ -194,7 +198,7 @@ export default function CampaignsPage() {
         ) : (
           <div className={cn("transition-opacity", campaigns.isPlaceholderData && "opacity-60")}>
             <CampaignsTable
-              campaigns={data.campaigns}
+              campaigns={data.campaigns.filter((c) => isPlatformShown(c.platform))}
               totals={data.totals}
               currency={data.currency}
               workspaceId={workspace.id}

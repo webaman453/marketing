@@ -18,6 +18,10 @@ const GLYPH: Record<Platform, string> = {
   OUTBRAIN: "O",
   TRADEDESK: "TD",
   YAHOO: "Y",
+  SHOPIFY: "Sh",
+  SWIGGY: "Sw",
+  ZEPTO: "Z",
+  NAUKRI: "N",
 };
 
 const SIZES = {

@@ -5,6 +5,7 @@ import {
   METRIC_FORMATS,
   PLATFORM_INFO,
   PRESET_TITLES,
+  isPlatformShown,
   REPORT_DIMENSIONS,
   REPORT_METRICS,
   REPORT_PRESETS,
@@ -79,7 +80,7 @@ export function ReportEditor({ report: initial }: { report: ReportDTO | null }) 
     placeholderData: (prev) => prev,
   });
 
-  const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))], [accounts.data]);
+  const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))].filter(isPlatformShown), [accounts.data]);
   const dirty = !report || report.name !== name || JSON.stringify(report.config) !== JSON.stringify(config);
 
   async function save() {

@@ -14,7 +14,7 @@ export function ProductPreview() {
     { p: "GOOGLE", name: "Performance Max – All Products", spend: "₹6,35,057", roas: "3.6×" },
     { p: "META", name: "Festive Sale – Prospecting", spend: "₹5,66,176", roas: "3.5×" },
     { p: "GOOGLE", name: "YouTube – Collection Launch", spend: "₹2,79,729", roas: "0.7×" },
-    { p: "TIKTOK", name: "Spark Ads – Creator UGC", spend: "₹1,94,585", roas: "2.1×" },
+    { p: "LINKEDIN", name: "Lead gen – Decision makers", spend: "₹1,94,585", roas: "2.1×" },
   ];
 
   return (

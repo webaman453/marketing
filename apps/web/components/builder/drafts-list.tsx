@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORM_INFO, type DraftDTO, type Platform } from "@ashniva/shared";
+import { PLATFORM_INFO, isPlatform, isPlatformShown, type DraftDTO, type Platform } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileClock, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -26,7 +26,7 @@ const STATUS: Record<DraftDTO["status"], { label: string; variant: "secondary" |
 export function DraftsList({ workspaceId, canEdit }: { workspaceId: string; canEdit: boolean }) {
   const drafts = useDrafts(workspaceId);
   const queryClient = useQueryClient();
-  const open = (drafts.data ?? []).filter((d) => d.status !== "LAUNCHED");
+  const open = (drafts.data ?? []).filter((d) => d.status !== "LAUNCHED" && (!isPlatform(d.payload.platform) || isPlatformShown(d.payload.platform)));
   if (open.length === 0) return null;
 
   async function remove(d: DraftDTO) {

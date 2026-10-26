@@ -1,4 +1,4 @@
-import { BRAND, PAID_PLANS, PLATFORM_INFO, PLATFORMS, catalogSchema, defaultCatalog, money, type Catalog } from "@ashniva/shared";
+import { BRAND, PAID_PLANS, PLATFORM_INFO, VISIBLE_PLATFORMS, catalogSchema, defaultCatalog, money, type Catalog } from "@ashniva/shared";
 import {
   ArrowRight,
   BarChart3,
@@ -114,7 +114,7 @@ export default async function LandingPage() {
         <div className="mx-auto max-w-6xl px-5 py-12">
           <p className="text-center text-sm font-medium text-muted-foreground">Works with the platforms your budget lives on</p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            {PLATFORMS.map((p) => {
+            {VISIBLE_PLATFORMS.map((p) => {
               const live = PLATFORM_INFO[p].availability === "live";
               return (
                 <span key={p} className="inline-flex items-center gap-2.5 rounded-full border bg-background py-1.5 pr-4 pl-1.5 text-sm">

@@ -4,6 +4,7 @@ import {
   CREDENTIAL_GROUPS,
   PLANS,
   PLATFORM_INFO,
+  isPlatformShown,
   type CredentialGroupId,
   type Platform,
 } from "@ashniva/shared";
@@ -485,7 +486,7 @@ function AdminConsole() {
                 </p>
               ) : (
                 <ul className="divide-y">
-                  {failures.data?.map((f) => (
+                  {failures.data?.filter((f) => isPlatformShown(f.platform)).map((f) => (
                     <li key={f.id} className="flex items-start gap-3 px-6 py-3">
                       <PlatformIcon platform={f.platform} size="sm" />
                       <div className="min-w-0 flex-1 text-sm">
@@ -703,7 +704,7 @@ function ImportantLinks({
   ];
   const redirects = CREDENTIAL_GROUPS.flatMap((group) => {
     const href = group.platform ? redirectUrls?.[group.platform] : undefined;
-    if (!group.needsRedirectUrl || !href) return [];
+    if (!group.needsRedirectUrl || !href || (group.platform && !isPlatformShown(group.platform))) return [];
     return [{ label: `${group.title} redirect`, hint: "Paste this into that platform's OAuth redirect URLs.", href }];
   });
   const rows = webhookUrl

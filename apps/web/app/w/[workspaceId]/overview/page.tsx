@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformShown } from "@ashniva/shared";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { DateRangePicker } from "@/components/app/date-range-picker";
@@ -72,12 +73,12 @@ export default function OverviewPage() {
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
             <PerformanceChart series={data.timeseries} currency={data.currency} />
-            <PlatformBreakdown rows={data.byPlatform} currency={data.currency} />
+            <PlatformBreakdown rows={data.byPlatform.filter((row) => isPlatformShown(row.platform))} currency={data.currency} />
           </div>
 
           <AiInsights />
 
-          <TopCampaigns campaigns={data.topCampaigns} workspaceId={workspace.id} currency={data.currency} />
+          <TopCampaigns campaigns={data.topCampaigns.filter((campaign) => isPlatformShown(campaign.platform))} workspaceId={workspace.id} currency={data.currency} />
         </div>
       )}
     </div>

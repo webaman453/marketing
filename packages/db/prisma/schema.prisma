@@ -46,6 +46,10 @@ enum Platform {
   OUTBRAIN
   TRADEDESK
   YAHOO
+  SHOPIFY
+  SWIGGY
+  ZEPTO
+  NAUKRI
 }
 
 enum ConnectionMode {

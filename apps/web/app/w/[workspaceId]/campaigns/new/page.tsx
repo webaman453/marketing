@@ -1,6 +1,6 @@
 "use client";
 
-import { isPlatform, type Platform, type Values } from "@ashniva/shared";
+import { isPlatform, isPlatformShown, type Platform, type Values } from "@ashniva/shared";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -23,7 +23,7 @@ export default function NewCampaignPage() {
 
 function presetFrom(params: { get(name: string): string | null; entries(): IterableIterator<[string, string]> }): { platform: Platform; setup: Values } | null {
   const platform = params.get("platform");
-  if (!isPlatform(platform)) return null;
+  if (!isPlatform(platform) || !isPlatformShown(platform)) return null;
   const setup: Values = {};
   for (const [key, value] of params.entries()) {
     if (key === "platform" || key === "draft") continue;

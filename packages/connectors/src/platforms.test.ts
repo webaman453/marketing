@@ -30,6 +30,7 @@ import { SpotifyAdsConnector } from "./spotify";
 import { TaboolaConnector } from "./taboola";
 import { TradeDeskConnector } from "./tradedesk";
 import { XAdsConnector } from "./x";
+import { ShopifyConnector } from "./shopify";
 import { YahooDspConnector } from "./yahoo";
 import type { AccountRef } from "./types";
 
@@ -329,6 +330,15 @@ function route(url: string, method: string): unknown {
     return { id: "yh-new" };
   }
 
+  if (host.endsWith(".myshopify.com")) {
+    if (path.endsWith("/shop.json")) return { shop: { name: "Ashniva", myshopify_domain: "ashniva.myshopify.com", currency: "INR", iana_timezone: "Asia/Kolkata" } };
+    if (path.endsWith("/marketing_events.json") && method === "GET") {
+      return { marketing_events: [{ id: 41, utm_campaign: "Festive", marketing_channel: "social", budget: "25.00", budget_type: "daily", ended_at: "2020-01-01T00:00:00Z", description: "Store sale", referring_domain: "ashniva.com" }] };
+    }
+    if (method === "POST") return { marketing_event: { id: 77 } };
+    return {};
+  }
+
   if (host === "api.thetradedesk.com") {
     if (path.endsWith("/advertiser/query/partner")) return { Result: [{ AdvertiserId: "adv1", AdvertiserName: "Desk", CurrencyCode: "USD" }] };
     if (path.endsWith("/campaign/query/advertiser")) return { Result: [{ CampaignId: "c1", CampaignName: "Prospecting", Availability: "Available", Budget: { Amount: 50 } }] };
@@ -553,6 +563,26 @@ describe("integration: connect, sync and paused create", () => {
     assert.deepEqual(created[groupAt]?.json?.RTBAttributes?.CreativeIds, ["cr1"]);
     assert.equal(created.find((h) => h.url.endsWith("/campaign"))?.json?.Availability, "Archived");
   });
+
+  it("Shopify records a paused marketing event on the store", async () => {
+    installFetch();
+    const state = `h.${Buffer.from(JSON.stringify({ shop: "ashniva.myshopify.com" })).toString("base64url")}.s`;
+    const c = new ShopifyConnector({ clientId: "shop", clientSecret: "sec" });
+    assert.match(c.getAuthUrl({ state, redirectUri: redirect }), /ashniva\.myshopify\.com\/admin\/oauth\/authorize/);
+    const tokens = await c.exchangeCode({ code: "code", redirectUri: redirect, state });
+    assert.match(tokens.accessToken, /^ashniva\.myshopify\.com /);
+    const account = ref((await c.listAdAccounts(tokens))[0]!);
+    assert.equal(account.externalId, "ashniva.myshopify.com");
+    assert.equal((await c.fetchStructure(tokens, account)).campaigns[0]?.status, "PAUSED");
+    const made = await c.createCampaign(tokens, account, readyDraft("SHOPIFY", { channel: "social" }), new Map());
+    assert.equal(made.campaigns[0]?.status, "PAUSED");
+    assert.equal(made.campaigns[0]?.externalId, "77");
+    const body = hits.find((h) => h.method === "POST" && h.url.includes("/marketing_events.json"))?.json?.marketing_event;
+    assert.equal(body?.marketing_channel, "social");
+    assert.equal(body?.paid, true);
+    assert.equal(body?.ended_at, body?.started_at);
+    assert.ok(made.warnings?.length);
+  });
 });
 
 function setupValues(spec: PlatformBuilderSpec) {
@@ -582,6 +612,7 @@ function fullConfig(): ConnectorsConfig {
     outbrain: { apiToken: "tok" },
     tradedesk: { apiToken: "tok", partnerId: "partner" },
     yahoo: { clientId: "id", clientSecret: "sec" },
+    shopify: { clientId: "id", clientSecret: "sec" },
   };
 }
 
@@ -603,5 +634,6 @@ function blankConfig(): ConnectorsConfig {
     outbrain: {},
     tradedesk: {},
     yahoo: {},
+    shopify: {},
   };
 }
