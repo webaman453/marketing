@@ -268,7 +268,7 @@ function route(url: string, method: string): unknown {
   }
 
   if (host === "backstage.taboola.com") {
-    if (path.endsWith("/users/current")) return { account_id: "tb", name: "Taboola user" };
+    if (path.endsWith("/users/current/account")) return { account_id: "tb", name: "Taboola user" };
     if (path.endsWith("/allowed-accounts")) return { results: [{ account_id: "acc", name: "News", currency: "USD", time_zone_name: "Asia/Kolkata" }] };
     if (path.includes("/reports/")) return { results: [{ date: "2026-10-01", campaign: "c1", impressions: 100, clicks: 4, spent: 3.5, cpa_actions_num: 1 }] };
     if (path.endsWith("/items/") && method === "GET") return { results: [{ id: "i1", title: "Story", description: "Body", url: "https://example.com", thumbnail_url: "https://cdn.example.com/a.jpg", is_active: true }] };
@@ -308,8 +308,8 @@ function route(url: string, method: string): unknown {
   }
 
   if (host === "api-partner.spotify.com") {
-    if (path === "/ads/v3/me") return { id: "sp-user", name: "Spotify user" };
-    if (path === "/ads/v3/ad_accounts") return { ad_accounts: [{ id: "sa1", name: "Spotify ads", currency: "USD" }] };
+    if (path === "/ads/v3/businesses") return { businesses: [{ id: "biz1", name: "Spotify user" }] };
+    if (path === "/ads/v3/businesses/biz1/ad_accounts") return { ad_accounts: [{ id: "sa1", name: "Spotify ads", currency_code: "USD", status: "ACTIVE" }] };
     if (path.endsWith("/campaigns") && method === "GET") return { campaigns: [{ id: "c1", name: "Audio", status: "ACTIVE", objective: "CLICKS" }] };
     if (path.endsWith("/ad_sets") && method === "GET") return { ad_sets: [{ id: "g1", campaign_id: "c1", name: "Set", status: "ACTIVE", budget: { micro_amount: 8_000_000 } }] };
     if (path.endsWith("/ads") && method === "GET") return { ads: [{ id: "a1", ad_set_id: "g1", name: "Spot", status: "ACTIVE", format: "AUDIO" }] };
@@ -376,6 +376,7 @@ describe("integration: connect, sync and paused create", () => {
     assert.match(c.getAuthUrl({ state: "s", redirectUri: redirect }), /code=client_credentials/);
     const tokens = await c.exchangeCode({ code: "client_credentials", redirectUri: redirect });
     assert.equal(tokens.accessToken, "access-1");
+    assert.equal((await c.getUser(tokens)).id, "tb");
     const accounts = await c.listAdAccounts({ accessToken: tokens.accessToken });
     assert.equal(accounts[0]?.externalId, "acc");
     const account = ref(accounts[0]!);

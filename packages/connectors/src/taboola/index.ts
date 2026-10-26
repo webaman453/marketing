@@ -57,8 +57,8 @@ export class TaboolaConnector implements AdPlatformConnector {
   }
 
   async getUser(auth: ConnectorAuth) {
-    const u = await this.call<Row>("/users/current", auth);
-    return { id: String(u.account_id ?? u.id ?? u.name ?? "taboola"), name: u.name ?? u.email ?? "Taboola" };
+    const account = await this.call<Row>("/users/current/account", auth);
+    return { id: String(account.account_id ?? account.id ?? "taboola"), name: account.name ?? account.account_id ?? "Taboola" };
   }
 
   async listAdAccounts(auth: ConnectorAuth): Promise<ExternalAdAccount[]> {

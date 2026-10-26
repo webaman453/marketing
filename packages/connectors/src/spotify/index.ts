@@ -57,20 +57,46 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
     return this.token({ grant_type: "refresh_token", refresh_token: refreshToken });
   }
 
+  /** Ads API v3 lists businesses first. A removed /ad_accounts call comes back as 403. */
+  private async businesses(auth: ConnectorAuth) {
+    try {
+      return await this.call<{ businesses?: Row[] }>("/businesses", auth);
+    } catch (err) {
+      if (err instanceof ConnectorError && err.code === "PERMISSION_DENIED") {
+        throw new ConnectorError(
+          "PERMISSION_DENIED",
+          "Spotify refused this app. In the developer dashboard choose Ads API, accept the Ads API terms for this Client ID in Ads Manager, then connect the Spotify user that manages those ads.",
+          err.details,
+        );
+      }
+      throw err;
+    }
+  }
+
   async getUser(auth: ConnectorAuth) {
-    const me = await this.call<Row>("/me", auth).catch(async () => this.call<Row>("/ad_accounts?limit=1", auth));
-    return { id: String(me.id ?? "spotify"), name: me.name ?? "Spotify Ads" };
+    const business = (await this.businesses(auth)).businesses?.[0];
+    if (!business) {
+      throw new ConnectorError("PERMISSION_DENIED", "This Spotify login has no Ads Manager business. Connect the user that owns the ad account.");
+    }
+    return { id: String(business.id), name: business.name ?? "Spotify Ads" };
   }
 
   async listAdAccounts(auth: ConnectorAuth): Promise<ExternalAdAccount[]> {
-    const res = await this.call<{ ad_accounts?: Row[]; items?: Row[] }>("/ad_accounts", auth);
-    return (res.ad_accounts ?? res.items ?? []).map((a) => ({
-      externalId: String(a.id),
-      name: a.name ?? String(a.id),
-      currency: a.currency ?? "USD",
-      timezone: a.timezone ?? null,
-      status: "ACTIVE",
-    }));
+    const accounts: ExternalAdAccount[] = [];
+    for (const business of (await this.businesses(auth)).businesses ?? []) {
+      const res = await this.call<{ ad_accounts?: Row[] }>(`/businesses/${business.id}/ad_accounts`, auth);
+      for (const account of res.ad_accounts ?? []) {
+        accounts.push({
+          externalId: String(account.id),
+          name: account.name ?? String(account.id),
+          currency: account.currency_code ?? account.currency ?? "USD",
+          timezone: account.timezone ?? null,
+          status: account.status === "INACTIVE" ? "PAUSED" : "ACTIVE",
+          meta: { businessId: String(business.id) },
+        });
+      }
+    }
+    return accounts;
   }
 
   async fetchStructure(auth: ConnectorAuth, account: AccountRef): Promise<AccountStructure> {

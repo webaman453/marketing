@@ -280,12 +280,13 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     kind: "platform",
     platform: "SPOTIFY",
     purpose: "Lets customers connect Spotify Ads accounts.",
-    consoleUrl: "https://developer.spotify.com/dashboard",
+    consoleUrl: "https://adsmanager.spotify.com/api-terms",
     consoleLabel: "Spotify developer dashboard",
     steps: [
-      "Create a Spotify app that has been approved for the Ads API.",
+      "Create a Spotify app and choose Ads API as the API you plan to use.",
+      "In Ads Manager, accept the Ads API terms for this Client ID. Spotify can take up to an hour to allow it.",
       "Add the redirect URL below.",
-      "Paste the Client ID and Client secret here. Customers sign in with the Spotify account that manages ads.",
+      "Paste the Client ID and Client secret. Connect with the Spotify user that owns the Ads Manager account.",
     ],
     needsRedirectUrl: true,
     fields: [
