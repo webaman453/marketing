@@ -426,6 +426,8 @@ export interface LeadsResponse {
     currency: string;
   };
   bySource: { source: string; count: number }[];
+  /** How many leads each platform contributed in this response's filter. */
+  byPlatform: { platform: Platform; count: number }[];
   /** Leads per hour of day (0-23) in the workspace timezone */
   byHour: number[];
   byDay: { date: string; count: number }[];

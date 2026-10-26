@@ -83,7 +83,7 @@ const NAV_GROUPS = [
 ] as const;
 
 export function AppSidebar() {
-  const { workspace, can } = useWorkspace();
+  const { me, workspace, can } = useWorkspace();
   const pathname = usePathname();
   const base = `/w/${workspace.id}`;
   const isActive = (href: string) => pathname === `${base}/${href}` || pathname.startsWith(`${base}/${href}/`);
@@ -140,6 +140,24 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {me.user.isSuperAdmin && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Platform</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname.startsWith("/admin")} tooltip="Platform admin">
+                    <Link href="/admin">
+                      <ShieldCheck />
+                      <span>Platform admin</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>

@@ -96,6 +96,7 @@ export function useCampaign(workspaceId: string, campaignId: string) {
 }
 
 export interface LeadFilters {
+  platform?: Platform;
   source?: string;
   campaignId?: string;
   search?: string;

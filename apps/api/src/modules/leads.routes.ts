@@ -1,6 +1,6 @@
 import { contactOf } from "@ashniva/core";
 import { prisma, num, type Lead, type Prisma } from "@ashniva/db";
-import type { LeadDTO, LeadsResponse } from "@ashniva/shared";
+import { PLATFORMS, type LeadDTO, type LeadsResponse } from "@ashniva/shared";
 import { Router } from "express";
 import { z } from "zod";
 import { parse } from "../lib/errors";
@@ -14,6 +14,7 @@ const query = z.object({
   from: isoDate,
   to: isoDate,
   source: z.string().max(20).optional(),
+  platform: z.enum(PLATFORMS).optional(),
   campaignId: z.string().max(50).optional(),
   adId: z.string().max(50).optional(),
   search: z.string().trim().max(100).optional(),
@@ -48,6 +49,7 @@ async function load(req: { workspace?: { id: string }; query: unknown }) {
   const where: Prisma.LeadWhereInput = {
     workspaceId: req.workspace!.id,
     createdTime: { gte: dayStart(q.from, tz), lt: dayStart(nextDay(q.to), tz) },
+    ...(q.platform ? { platform: q.platform } : {}),
     ...(q.source ? { source: q.source } : {}),
     ...(q.campaignId ? { campaignId: q.campaignId } : {}),
     ...(q.adId ? { adId: q.adId } : {}),
@@ -113,11 +115,13 @@ leadsRouter.get("/leads", async (req, res) => {
   const costs = leads.map(costOf);
 
   const bySource = new Map<string, number>();
+  const byPlatform = new Map<string, number>();
   const byHour = Array<number>(24).fill(0);
   const byDay = new Map<string, number>();
   const byCampaign = new Map<string, { campaignId: string | null; name: string; count: number; cost: number }>();
   leads.forEach((l, i) => {
     bySource.set(l.source ?? "unknown", (bySource.get(l.source ?? "unknown") ?? 0) + 1);
+    byPlatform.set(l.platform, (byPlatform.get(l.platform) ?? 0) + 1);
     const p = parts(l.createdTime, tz);
     byHour[p.hour]!++;
     byDay.set(p.day, (byDay.get(p.day) ?? 0) + 1);
@@ -133,7 +137,7 @@ leadsRouter.get("/leads", async (req, res) => {
 
   // Surface "reconnect to read leads" without failing the page.
   const runs = await prisma.syncRun.findMany({
-    where: { status: "SUCCESS", connection: { mode: "LIVE", adAccounts: { some: { workspaceId: req.workspace!.id } } } },
+    where: { status: "SUCCESS", connection: { mode: "LIVE", ...(q.platform ? { platform: q.platform } : {}), adAccounts: { some: { workspaceId: req.workspace!.id } } } },
     orderBy: { startedAt: "desc" },
     take: 5,
     select: { stats: true, connectionId: true },
@@ -150,6 +154,7 @@ leadsRouter.get("/leads", async (req, res) => {
     leads: leads.slice(start, start + q.pageSize).map((l, i) => toDTO(l, costs[start + i] ?? null, currency)),
     summary: { total: leads.length, avgCost: priced.length ? totalCost! / priced.length : null, totalCost, currency },
     bySource: [...bySource].map(([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count),
+    byPlatform: [...byPlatform].map(([platform, count]) => ({ platform: platform as LeadsResponse["byPlatform"][number]["platform"], count })).sort((a, b) => b.count - a.count),
     byHour,
     byDay: [...byDay].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date)),
     byCampaign: [...byCampaign.values()]

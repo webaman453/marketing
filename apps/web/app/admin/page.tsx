@@ -10,6 +10,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Copy,
   Loader2,
   MoreHorizontal,
   Search,
@@ -19,7 +20,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useDeferredValue, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CredentialsPanel } from "@/components/admin/credentials-panel";
+import { CredentialsPanel, useCredentials } from "@/components/admin/credentials-panel";
 import { PricingEditor } from "@/components/admin/pricing-editor";
 import { Logo } from "@/components/brand";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -144,6 +145,7 @@ function AdminConsole() {
     if (me.data && !me.data.user.isSuperAdmin) router.replace("/app");
   }, [me.data, router]);
 
+  const creds = useCredentials(!!allowed);
   const stats = useQuery({
     queryKey: ["admin-stats"],
     queryFn: () => api<Stats>("/admin/stats"),
@@ -281,6 +283,7 @@ function AdminConsole() {
             <PricingEditor />
           </TabsContent>
           <TabsContent value="overview" className="mt-6 space-y-6">
+            <ImportantLinks redirectUrls={creds.data?.redirectUrls} webhookUrl={creds.data?.webhookUrl} />
             <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-4">
               {!s
                 ? Array.from({ length: 8 }).map((_, i) => (
@@ -682,5 +685,60 @@ function GrantTokensDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ImportantLinks({
+  redirectUrls,
+  webhookUrl,
+}: {
+  redirectUrls?: Partial<Record<Platform, string>>;
+  webhookUrl?: string;
+}) {
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const pages: { label: string; hint: string; href: string }[] = [
+    { label: "Platform admin", hint: "This page. Organizations are the table below.", href: `${origin}/admin` },
+    { label: "Sign in", hint: "Where a company logs in after an account exists.", href: `${origin}/login` },
+    { label: "Create account", hint: "A new company registers here and appears in Organizations.", href: `${origin}/signup` },
+  ];
+  const redirects = CREDENTIAL_GROUPS.flatMap((group) => {
+    const href = group.platform ? redirectUrls?.[group.platform] : undefined;
+    if (!group.needsRedirectUrl || !href) return [];
+    return [{ label: `${group.title} redirect`, hint: "Paste this into that platform's OAuth redirect URLs.", href }];
+  });
+  const rows = webhookUrl
+    ? [...pages, ...redirects, { label: "Razorpay webhook", hint: "Paste this as the payment webhook URL.", href: webhookUrl }]
+    : [...pages, ...redirects];
+
+  return (
+    <Card className="gap-0 overflow-hidden py-0">
+      <CardHeader className="border-b py-4">
+        <CardTitle>Important links</CardTitle>
+        <CardDescription>Open these from the sidebar item Platform admin. Copy a link when a platform asks for a redirect URL.</CardDescription>
+      </CardHeader>
+      <ul className="divide-y">
+        {rows.map((row) => (
+          <li key={row.label} className="flex items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium">{row.label}</div>
+              <div className="truncate font-mono text-xs text-muted-foreground" title={row.href}>{row.href || "—"}</div>
+              <div className="text-xs text-muted-foreground">{row.hint}</div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!row.href}
+              onClick={() => {
+                void navigator.clipboard.writeText(row.href);
+                toast.success("Copied", { description: row.label });
+              }}
+            >
+              <Copy /> Copy
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

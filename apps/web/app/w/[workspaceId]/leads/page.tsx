@@ -1,13 +1,15 @@
 "use client";
 
-import type { LeadDTO } from "@ashniva/shared";
-import { ChevronLeft, ChevronRight, Clock, Contact, Download, Mail, Phone, Search, TriangleAlert } from "lucide-react";
+import { PLATFORMS, PLATFORM_INFO, isPlatform, type LeadDTO, type Platform } from "@ashniva/shared";
+import { ArrowLeft, ChevronLeft, ChevronRight, Clock, Contact, Download, Mail, Phone, Search, TriangleAlert } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { DateRangePicker } from "@/components/app/date-range-picker";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState, ErrorState } from "@/components/app/states";
 import { useWorkspace } from "@/components/app/workspace-context";
+import { PlatformIcon } from "@/components/platform-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,6 +21,13 @@ import { useDateRange } from "@/lib/date-range";
 import { money } from "@/lib/format";
 import { useLeads } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+
+const GROUPS: { label: string; ids: Platform[] }[] = [
+  { label: "Social", ids: ["META", "TIKTOK", "SNAPCHAT", "X", "LINKEDIN", "PINTEREST"] },
+  { label: "Search and shopping", ids: ["GOOGLE", "MICROSOFT", "AMAZON", "APPLE"] },
+  { label: "Native", ids: ["TABOOLA", "OUTBRAIN"] },
+  { label: "Audio and programmatic", ids: ["SPOTIFY", "CRITEO", "YAHOO", "TRADEDESK"] },
+];
 
 const SOURCES: Record<string, string> = { fb: "Facebook", ig: "Instagram", an: "Audience Network", ms: "Messenger", unknown: "Other" };
 const sourceName = (s: string | null) => SOURCES[s ?? "unknown"] ?? s ?? "Other";
@@ -43,19 +52,87 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
 }
 
 export default function LeadsPage() {
+  return (
+    <Suspense>
+      <Leads />
+    </Suspense>
+  );
+}
+
+function Leads() {
+  const params = useSearchParams();
+  const requested = params.get("platform");
+  if (isPlatform(requested)) return <PlatformLeads key={requested} platform={requested} />;
+  return <PlatformGallery />;
+}
+
+function PlatformGallery() {
   const { workspace } = useWorkspace();
+  const router = useRouter();
+  const leads = useLeads(workspace.id, { page: 1 });
+  const counts = Object.fromEntries(PLATFORMS.map((platform) => [platform, 0])) as Record<Platform, number>;
+  for (const row of leads.data?.byPlatform ?? []) counts[row.platform] = row.count;
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Leads"
+        description="Choose a platform. The next screen lists the people who came in from that platform."
+        actions={<DateRangePicker />}
+      />
+      {leads.isError ? (
+        <ErrorState message="Couldn't load leads." onRetry={() => leads.refetch()} />
+      ) : !leads.data ? (
+        <Skeleton className="h-96 w-full rounded-xl" />
+      ) : (
+        GROUPS.map((group) => (
+          <section key={group.label} className="space-y-3">
+            <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{group.label}</h2>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {group.ids.map((platform) => {
+                const info = PLATFORM_INFO[platform];
+                const count = counts[platform];
+                return (
+                  <button
+                    key={platform}
+                    type="button"
+                    onClick={() => router.push(`/w/${workspace.id}/leads?platform=${platform}`)}
+                    className="flex h-full flex-col rounded-xl border bg-card p-5 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <PlatformIcon platform={platform} size="lg" />
+                      <Badge variant={count ? "secondary" : "outline"}>{count ? `${count} lead${count === 1 ? "" : "s"}` : "No leads"}</Badge>
+                    </div>
+                    <div className="mt-4 text-base font-semibold tracking-tight">{info.name}</div>
+                    <p className="mt-1 line-clamp-2 flex-1 text-sm leading-relaxed text-muted-foreground">{info.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
+
+function PlatformLeads({ platform }: { platform: Platform }) {
+  const { workspace } = useWorkspace();
+  const router = useRouter();
+  const info = PLATFORM_INFO[platform];
   const { from, to } = useDateRange();
   const [source, setSource] = useState<string | undefined>();
   const [campaignId, setCampaignId] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<LeadDTO | null>(null);
-  const leads = useLeads(workspace.id, { source, campaignId, search: search || undefined, page });
+  const leads = useLeads(workspace.id, { platform, source, campaignId, search: search || undefined, page });
   const data = leads.data;
 
   const exportHref = `/api/workspaces/${workspace.id}/leads/export?${new URLSearchParams({
     from,
     to,
+    platform,
     ...(source ? { source } : {}),
     ...(campaignId ? { campaignId } : {}),
     ...(search ? { search } : {}),
@@ -73,8 +150,8 @@ export default function LeadsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Leads"
-        description="People who filled your Facebook and Instagram lead forms, with when they came and what they cost."
+        title={`${info.name} leads`}
+        description={`People who came in from ${info.name} during this date range.`}
         actions={
           <>
             <DateRangePicker />
@@ -83,9 +160,13 @@ export default function LeadsPage() {
             </Button>
           </>
         }
-      />
+      >
+        <Button variant="ghost" size="sm" className="-ml-2 w-fit" onClick={() => router.push(`/w/${workspace.id}/leads`)}>
+          <ArrowLeft /> All platforms
+        </Button>
+      </PageHeader>
 
-      {data?.leadsError && (
+      {platform === "META" && data?.leadsError && (
         <Card className="flex-row items-start gap-3 border-amber-300/60 bg-amber-50 p-4 text-sm dark:bg-amber-950/20">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
           <div>
@@ -104,7 +185,7 @@ export default function LeadsPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Kpi label="Leads" value={String(data.summary.total)} />
-            <Kpi label="Est. cost per lead" value={data.summary.avgCost == null ? "—" : money(data.summary.avgCost, data.summary.currency)} hint="Average; Meta doesn't bill per lead" />
+            <Kpi label="Est. cost per lead" value={data.summary.avgCost == null ? "—" : money(data.summary.avgCost, data.summary.currency)} hint="That day's ad spend, shared across the leads it received" />
             <Kpi label="Busiest hour" value={bestHour == null ? "—" : hourLabel(bestHour)} hint={bestHour == null ? undefined : `${peak} leads · ${data.timezone}`} />
             <Kpi label="Top source" value={topSource ? sourceName(topSource.source) : "—"} hint={topSource ? `${topSource.count} leads` : undefined} />
           </div>
@@ -142,7 +223,7 @@ export default function LeadsPage() {
               <Input value={search} onChange={(e) => reset(setSearch)(e.target.value)} placeholder="Search name, email, phone…" className="pl-8" />
             </div>
             <div className="flex gap-1">
-              {[undefined, "fb", "ig"].map((s) => (
+              {(platform === "META" ? [undefined, "fb", "ig"] : [undefined, ...data.bySource.map((s) => s.source)]).map((s) => (
                 <Button key={s ?? "all"} size="sm" variant={source === s ? "default" : "outline"} onClick={() => reset(setSource)(s)}>{s ? sourceName(s) : "All sources"}</Button>
               ))}
             </div>
@@ -155,7 +236,7 @@ export default function LeadsPage() {
           </div>
 
           {data.total === 0 ? (
-            <Card><EmptyState icon={Contact} title="No leads in this period" description="Leads from your Facebook and Instagram forms show up here as soon as they sync. Try a wider date range, or reconnect Meta if you haven't granted lead access." /></Card>
+            <Card><EmptyState icon={Contact} title={`No leads from ${info.name}`} description={platform === "META" ? "Facebook and Instagram Instant Form leads show up here after a sync. Try a wider date range, or reconnect Meta if lead access was not granted." : `${info.name} leads for this date range show up here after they sync.`} /></Card>
           ) : (
             <Card className="gap-0 overflow-hidden py-0">
               <Table>
