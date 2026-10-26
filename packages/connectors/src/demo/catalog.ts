@@ -29,6 +29,31 @@ export interface DemoAccountSpec {
   campaigns: DemoCampaignSpec[];
 }
 
+function sample(externalId: string, name: string, objective: string, group: string, ad: { name: string; headline: string; body: string }): DemoAccountSpec {
+  return {
+    externalId,
+    name,
+    currency: "INR",
+    timezone: "Asia/Kolkata",
+    campaigns: [
+      {
+        key: "a1",
+        name: `${name.split("·").pop()?.trim() ?? name} · Prospecting`,
+        status: "ACTIVE",
+        objective,
+        dailyBudget: 4000,
+        cpm: 120,
+        ctr: 0.008,
+        cvr: 0.02,
+        aov: 900,
+        startedDaysAgo: 40,
+        groups: [group],
+        ads: [ad],
+      },
+    ],
+  };
+}
+
 const fashionAds = [
   { name: "Reel – Festive Collection 15s", headline: "The Festive Edit is here", body: "Handcrafted ethnic wear, delivered in 48 hours." },
   { name: "Carousel – Bestsellers", headline: "Our 10 most-loved styles", body: "Swipe through the pieces everyone is wearing this season." },
@@ -393,4 +418,13 @@ export const DEMO_ACCOUNTS: Partial<Record<Platform, DemoAccountSpec>> = {
       },
     ],
   },
+  AMAZON: sample("demo-amazon-3001", "Ashniva Retail · Amazon", "SPONSORED_PRODUCTS", "Brand keywords", { name: "Sponsored product", headline: "Festive lehenga", body: "Shop the edit on Amazon." }),
+  X: sample("demo-x-3002", "Ashniva Retail · X", "WEBSITE_CLICKS", "Timeline · India", { name: "Festive post", headline: "The festive edit is live", body: "Shop the collection." }),
+  APPLE: sample("demo-apple-3003", "Ashniva Retail · Apple", "SEARCH", "Brand keywords", { name: "Search results", headline: "Ashniva", body: "Shop ethnic wear." }),
+  SPOTIFY: sample("demo-spotify-3004", "Ashniva Retail · Spotify", "REACH", "Music listeners", { name: "30s audio", headline: "Festive edit", body: "Listen, then shop." }),
+  CRITEO: sample("demo-criteo-3005", "Ashniva Retail · Criteo", "RETARGETING", "Site visitors", { name: "Homepage banner", headline: "Still thinking it over?", body: "Your picks are waiting." }),
+  TABOOLA: sample("demo-taboola-3006", "Ashniva Retail · Taboola", "TRAFFIC", "News readers", { name: "Native story", headline: "5 festive looks", body: "Ideas for the season." }),
+  OUTBRAIN: sample("demo-outbrain-3007", "Ashniva Retail · Outbrain", "Traffic", "Publisher network", { name: "Promoted link", headline: "The festive edit", body: "Open the lookbook." }),
+  TRADEDESK: sample("demo-ttd-3008", "Ashniva Retail · The Trade Desk", "DISPLAY", "Prospecting", { name: "300×250", headline: "Festive sale", body: "Up to 30% off." }),
+  YAHOO: sample("demo-yahoo-3009", "Ashniva Retail · Yahoo DSP", "DISPLAY", "India desktop", { name: "Display line", headline: "Festive sale", body: "Shop the edit." }),
 };

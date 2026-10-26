@@ -279,7 +279,7 @@ oauthRouter.get("/:platform/callback", async (req, res) => {
 
   try {
     const connector = connectors().get(state.platform);
-    const tokens = await connector.exchangeCode({ code, redirectUri: oauthRedirectUri(state.platform) });
+    const tokens = await connector.exchangeCode({ code, redirectUri: oauthRedirectUri(state.platform), state: String(req.query.state ?? "") });
     const user = await connector.getUser({ accessToken: tokens.accessToken });
 
     const data = {

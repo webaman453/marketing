@@ -37,6 +37,15 @@ enum Platform {
   MICROSOFT
   SNAPCHAT
   PINTEREST
+  AMAZON
+  X
+  APPLE
+  SPOTIFY
+  CRITEO
+  TABOOLA
+  OUTBRAIN
+  TRADEDESK
+  YAHOO
 }
 
 enum ConnectionMode {

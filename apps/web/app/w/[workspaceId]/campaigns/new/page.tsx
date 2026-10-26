@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatform, type Platform, type Values } from "@ashniva/shared";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -20,11 +21,23 @@ export default function NewCampaignPage() {
   );
 }
 
+function presetFrom(params: { get(name: string): string | null; entries(): IterableIterator<[string, string]> }): { platform: Platform; setup: Values } | null {
+  const platform = params.get("platform");
+  if (!isPlatform(platform)) return null;
+  const setup: Values = {};
+  for (const [key, value] of params.entries()) {
+    if (key === "platform" || key === "draft") continue;
+    setup[key] = value;
+  }
+  return { platform, setup };
+}
+
 function NewCampaign() {
   const { workspace } = useWorkspace();
   const params = useSearchParams();
   // Read once: the builder updates ?draft= itself after the first autosave.
   const [draftId] = useState(() => params.get("draft"));
+  const preset = presetFrom(params);
   const draft = useDraft(workspace.id, draftId);
 
   return (
@@ -39,7 +52,7 @@ function NewCampaign() {
       ) : draftId && !draft.data ? (
         <Skeleton className="h-[560px] rounded-xl" />
       ) : (
-        <CampaignBuilder initial={draft.data ?? null} />
+        <CampaignBuilder initial={draft.data ?? null} preset={preset} />
       )}
     </div>
   );

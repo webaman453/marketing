@@ -1,5 +1,7 @@
 import type { BuilderDraft, BuilderOptions, EntityStatus, Platform, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 
+export type { EntityStatus };
+
 export interface OAuthTokens {
   accessToken: string;
   refreshToken?: string;
@@ -154,7 +156,7 @@ export interface AdPlatformConnector {
   isConfigured(): boolean;
 
   getAuthUrl(params: { state: string; redirectUri: string }): string;
-  exchangeCode(params: { code: string; redirectUri: string }): Promise<OAuthTokens>;
+  exchangeCode(params: { code: string; redirectUri: string; state?: string }): Promise<OAuthTokens>;
   /** Returns null when the platform does not support refresh (e.g. Meta long-lived tokens). */
   refreshTokens(refreshToken: string): Promise<OAuthTokens | null>;
 

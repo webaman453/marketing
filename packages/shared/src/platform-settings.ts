@@ -23,7 +23,26 @@ export interface CredentialField {
   showWhen?: { key: string; values: string[] };
 }
 
-export type CredentialGroupId = "META" | "GOOGLE" | "TIKTOK" | "LINKEDIN" | "MICROSOFT" | "SNAPCHAT" | "PINTEREST" | "AI" | "RAZORPAY" | "EMAIL";
+export type CredentialGroupId =
+  | "META"
+  | "GOOGLE"
+  | "TIKTOK"
+  | "LINKEDIN"
+  | "MICROSOFT"
+  | "SNAPCHAT"
+  | "PINTEREST"
+  | "AMAZON"
+  | "X"
+  | "APPLE"
+  | "SPOTIFY"
+  | "CRITEO"
+  | "TABOOLA"
+  | "OUTBRAIN"
+  | "TRADEDESK"
+  | "YAHOO"
+  | "AI"
+  | "RAZORPAY"
+  | "EMAIL";
 
 export interface CredentialGroup {
   id: CredentialGroupId;
@@ -196,6 +215,165 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     fields: [
       { key: "PINTEREST_APP_ID", label: "App ID" },
       { key: "PINTEREST_APP_SECRET", label: "App secret key", secret: true },
+    ],
+  },
+  {
+    id: "AMAZON",
+    title: "Amazon Ads",
+    kind: "platform",
+    platform: "AMAZON",
+    purpose: "Lets customers connect Amazon Ads profiles.",
+    consoleUrl: "https://advertising.amazon.com/about-api",
+    consoleLabel: "Amazon Ads API",
+    steps: [
+      "Apply for the Amazon Ads API and create a Login with Amazon security profile.",
+      "Add the redirect URL below as an allowed return URL.",
+      "Paste the Client ID and Client secret here. Customers then connect the Amazon account that owns their advertising profiles.",
+    ],
+    needsRedirectUrl: true,
+    fields: [
+      { key: "AMAZON_CLIENT_ID", label: "Client ID" },
+      { key: "AMAZON_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "X",
+    title: "X Ads",
+    kind: "platform",
+    platform: "X",
+    purpose: "Lets customers connect X (Twitter) ad accounts.",
+    consoleUrl: "https://developer.x.com/en/portal/dashboard",
+    consoleLabel: "X developer portal",
+    steps: [
+      "Create a project and an app with Ads API access (OAuth 2.0).",
+      "Add the redirect URL below under User authentication settings.",
+      "Turn on ads.read and ads.write, then paste the Client ID and Client secret here.",
+    ],
+    needsRedirectUrl: true,
+    fields: [
+      { key: "X_CLIENT_ID", label: "Client ID" },
+      { key: "X_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "APPLE",
+    title: "Apple Ads",
+    kind: "platform",
+    platform: "APPLE",
+    purpose: "Lets customers connect Apple Search Ads organizations.",
+    consoleUrl: "https://app.searchads.apple.com/cm/app",
+    consoleLabel: "Apple Search Ads",
+    steps: [
+      "In Apple Search Ads, open Account Settings → API and create an API user with campaign management access.",
+      "Copy the Client ID and the client secret (the signed secret Apple shows once) into the fields here.",
+      "Connect uses those keys to list the organizations this API user can manage. No redirect URL is required.",
+    ],
+    fields: [
+      { key: "APPLE_ADS_CLIENT_ID", label: "Client ID" },
+      { key: "APPLE_ADS_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "SPOTIFY",
+    title: "Spotify Ads",
+    kind: "platform",
+    platform: "SPOTIFY",
+    purpose: "Lets customers connect Spotify Ads accounts.",
+    consoleUrl: "https://developer.spotify.com/dashboard",
+    consoleLabel: "Spotify developer dashboard",
+    steps: [
+      "Create a Spotify app that has been approved for the Ads API.",
+      "Add the redirect URL below.",
+      "Paste the Client ID and Client secret here. Customers sign in with the Spotify account that manages ads.",
+    ],
+    needsRedirectUrl: true,
+    fields: [
+      { key: "SPOTIFY_CLIENT_ID", label: "Client ID" },
+      { key: "SPOTIFY_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "CRITEO",
+    title: "Criteo",
+    kind: "platform",
+    platform: "CRITEO",
+    purpose: "Lets customers connect Criteo advertisers.",
+    consoleUrl: "https://developers.criteo.com/",
+    consoleLabel: "Criteo developers",
+    steps: [
+      "Create a Criteo app with the Marketing Solutions API and consent for the advertiser accounts you manage.",
+      "Paste the Client ID and Client secret here. Connect requests a token and lists those advertisers.",
+    ],
+    fields: [
+      { key: "CRITEO_CLIENT_ID", label: "Client ID" },
+      { key: "CRITEO_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "TABOOLA",
+    title: "Taboola",
+    kind: "platform",
+    platform: "TABOOLA",
+    purpose: "Lets customers connect Taboola Backstage accounts.",
+    consoleUrl: "https://backstage.taboola.com/",
+    consoleLabel: "Taboola Backstage",
+    steps: [
+      "In Backstage, open API → Apps and create an app with campaign permissions.",
+      "Paste the Client ID and Client secret here. Connect lists the accounts this app can manage.",
+    ],
+    fields: [
+      { key: "TABOOLA_CLIENT_ID", label: "Client ID" },
+      { key: "TABOOLA_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
+    id: "OUTBRAIN",
+    title: "Outbrain",
+    kind: "platform",
+    platform: "OUTBRAIN",
+    purpose: "Lets customers connect Outbrain Amplify marketers.",
+    consoleUrl: "https://my.outbrain.com/amplify/site/api",
+    consoleLabel: "Outbrain Amplify",
+    steps: [
+      "In Amplify, open Settings and create an API token for the marketer you want to manage.",
+      "Paste that token here. There is no OAuth redirect. Connect uses the token to list marketers.",
+    ],
+    fields: [{ key: "OUTBRAIN_API_TOKEN", label: "API token", secret: true }],
+  },
+  {
+    id: "TRADEDESK",
+    title: "The Trade Desk",
+    kind: "platform",
+    platform: "TRADEDESK",
+    purpose: "Lets customers connect The Trade Desk advertisers.",
+    consoleUrl: "https://partner.thetradedesk.com/",
+    consoleLabel: "The Trade Desk partner portal",
+    steps: [
+      "Ask The Trade Desk for a long-lived API token and your partner id.",
+      "Paste both here. There is no OAuth redirect. Connect lists advertisers under that partner.",
+    ],
+    fields: [
+      { key: "TRADEDESK_API_TOKEN", label: "API token", secret: true },
+      { key: "TRADEDESK_PARTNER_ID", label: "Partner ID" },
+    ],
+  },
+  {
+    id: "YAHOO",
+    title: "Yahoo DSP",
+    kind: "platform",
+    platform: "YAHOO",
+    purpose: "Lets customers connect Yahoo DSP advertisers.",
+    consoleUrl: "https://developer.yahooinc.com/",
+    consoleLabel: "Yahoo developer",
+    steps: [
+      "Create a Yahoo DSP OAuth app with traffic API access.",
+      "Add the redirect URL below.",
+      "Paste the Client ID and Client secret here.",
+    ],
+    needsRedirectUrl: true,
+    fields: [
+      { key: "YAHOO_CLIENT_ID", label: "Client ID" },
+      { key: "YAHOO_CLIENT_SECRET", label: "Client secret", secret: true },
     ],
   },
   {

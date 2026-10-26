@@ -9,6 +9,7 @@ import {
   FileText,
   History,
   LayoutDashboard,
+  LayoutGrid,
   LogOut,
   Contact,
   Megaphone,
@@ -73,6 +74,7 @@ const NAV_GROUPS = [
     label: "Manage",
     items: [
       { href: "campaigns", label: "Campaigns", icon: Megaphone },
+      { href: "formats", label: "Ad formats", icon: LayoutGrid },
       { href: "leads", label: "Leads", icon: Contact },
       { href: "creatives", label: "Creatives", icon: FileImage },
       { href: "automations", label: "Automations", icon: Bot },

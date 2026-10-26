@@ -6,6 +6,15 @@ import { microsoftSpec } from "./specs/microsoft";
 import { pinterestSpec } from "./specs/pinterest";
 import { snapchatSpec } from "./specs/snapchat";
 import { tiktokSpec } from "./specs/tiktok";
+import { amazonSpec } from "./specs/amazon";
+import { appleSpec } from "./specs/apple";
+import { criteoSpec } from "./specs/criteo";
+import { outbrainSpec } from "./specs/outbrain";
+import { spotifySpec } from "./specs/spotify";
+import { taboolaSpec } from "./specs/taboola";
+import { tradeDeskSpec } from "./specs/tradedesk";
+import { xSpec } from "./specs/x";
+import { yahooSpec } from "./specs/yahoo";
 import type { PlatformBuilderSpec } from "./types";
 
 export * from "./types";
@@ -29,6 +38,15 @@ export const BUILDER_SPECS: Record<Platform, PlatformBuilderSpec> = {
   MICROSOFT: microsoftSpec,
   SNAPCHAT: snapchatSpec,
   PINTEREST: pinterestSpec,
+  AMAZON: amazonSpec,
+  X: xSpec,
+  APPLE: appleSpec,
+  SPOTIFY: spotifySpec,
+  CRITEO: criteoSpec,
+  TABOOLA: taboolaSpec,
+  OUTBRAIN: outbrainSpec,
+  TRADEDESK: tradeDeskSpec,
+  YAHOO: yahooSpec,
 };
 
 export const builderSpec = (platform: Platform) => BUILDER_SPECS[platform];

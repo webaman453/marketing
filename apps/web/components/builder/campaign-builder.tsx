@@ -18,6 +18,7 @@ import {
   type FieldContext,
   type LevelSpec,
   type MediaInfo,
+  type Platform,
   type Values,
 } from "@ashniva/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -84,13 +85,13 @@ import {
 import { FieldRenderer, SectionTitleContext } from "./fields";
 import { ReviewScreen } from "./review";
 
-export function CampaignBuilder({ initial }: { initial: DraftDTO | null }) {
+export function CampaignBuilder({ initial, preset }: { initial: DraftDTO | null; preset?: { platform: Platform; setup: Values } | null }) {
   const startDraft =
     initial && isBuilderDraft(initial.payload)
       ? (initial.payload as BuilderDraft)
       : null;
   const [draft, setDraft] = useState<BuilderDraft | null>(startDraft);
-  if (!draft) return <BuilderStart onStart={setDraft} />;
+  if (!draft) return <BuilderStart onStart={setDraft} preset={preset ?? undefined} />;
   return <Editor initialDraft={draft} initial={initial} />;
 }
 

@@ -6,7 +6,10 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test --test-concurrency=1 src/platforms.test.ts"
+  },
   "dependencies": { "@ashniva/shared": "workspace:*", "fflate": "^0.8.2" },
-  "devDependencies": { "@types/node": "^24.0.0", "typescript": "~5.9.3" }
+  "devDependencies": { "@types/node": "^24.0.0", "tsx": "^4.23.15", "typescript": "~5.9.3" }
 }

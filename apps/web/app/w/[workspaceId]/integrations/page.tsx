@@ -16,6 +16,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CredentialDialog } from "@/components/admin/credentials-panel";
@@ -154,6 +155,13 @@ function PlatformsSection() {
             : "Sign in once per platform. Your team never has to share passwords."
         }
       />
+      <p className="text-sm text-muted-foreground">
+        After a platform is connected, open{" "}
+        <Link href={`/w/${workspace.id}/formats`} className="font-medium text-primary hover:underline">
+          Ad formats
+        </Link>{" "}
+        to see which ads it can run and the live results from this workspace.
+      </p>
       {platforms.isError ? (
         <Card><ErrorState message={platforms.error.message} onRetry={() => platforms.refetch()} /></Card>
       ) : !platforms.data ? (

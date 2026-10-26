@@ -55,13 +55,14 @@ export const qk = {
 export const useMe = () =>
   useQuery({ queryKey: qk.me, queryFn: () => api<MeResponse>("/auth/me"), staleTime: 60_000 });
 
-export function useOverview(workspaceId: string) {
+export function useOverview(workspaceId: string, refetchInterval?: number) {
   const { from, to, ready } = useDateRange();
   return useQuery({
     queryKey: qk.overview(workspaceId, from, to),
     queryFn: () => api<OverviewResponse>(`/workspaces/${workspaceId}/overview`, { query: { from, to } }),
     enabled: ready,
     placeholderData: keepPreviousData,
+    refetchInterval,
   });
 }
 

@@ -9,6 +9,15 @@ const GLYPH: Record<Platform, string> = {
   MICROSOFT: "MS",
   SNAPCHAT: "S",
   PINTEREST: "P",
+  AMAZON: "a",
+  X: "X",
+  APPLE: "A",
+  SPOTIFY: "S",
+  CRITEO: "C",
+  TABOOLA: "T",
+  OUTBRAIN: "O",
+  TRADEDESK: "TD",
+  YAHOO: "Y",
 };
 
 const SIZES = {

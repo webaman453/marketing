@@ -44,6 +44,41 @@ export function connectors(): ConnectorRegistry {
       appId: process.env.PINTEREST_APP_ID || undefined,
       appSecret: process.env.PINTEREST_APP_SECRET || undefined,
     },
+    amazon: {
+      clientId: process.env.AMAZON_CLIENT_ID || undefined,
+      clientSecret: process.env.AMAZON_CLIENT_SECRET || undefined,
+    },
+    x: {
+      clientId: process.env.X_CLIENT_ID || undefined,
+      clientSecret: process.env.X_CLIENT_SECRET || undefined,
+    },
+    apple: {
+      clientId: process.env.APPLE_ADS_CLIENT_ID || undefined,
+      clientSecret: process.env.APPLE_ADS_CLIENT_SECRET || undefined,
+    },
+    spotify: {
+      clientId: process.env.SPOTIFY_CLIENT_ID || undefined,
+      clientSecret: process.env.SPOTIFY_CLIENT_SECRET || undefined,
+    },
+    criteo: {
+      clientId: process.env.CRITEO_CLIENT_ID || undefined,
+      clientSecret: process.env.CRITEO_CLIENT_SECRET || undefined,
+    },
+    taboola: {
+      clientId: process.env.TABOOLA_CLIENT_ID || undefined,
+      clientSecret: process.env.TABOOLA_CLIENT_SECRET || undefined,
+    },
+    outbrain: {
+      apiToken: process.env.OUTBRAIN_API_TOKEN || undefined,
+    },
+    tradedesk: {
+      apiToken: process.env.TRADEDESK_API_TOKEN || undefined,
+      partnerId: process.env.TRADEDESK_PARTNER_ID || undefined,
+    },
+    yahoo: {
+      clientId: process.env.YAHOO_CLIENT_ID || undefined,
+      clientSecret: process.env.YAHOO_CLIENT_SECRET || undefined,
+    },
   });
   return registry;
 }

@@ -17,16 +17,16 @@ import { cn } from "@/lib/utils";
 import { ChoiceInput } from "./fields";
 
 /** Like the platforms' "Create campaign" step: where, which account, which objective. */
-export function BuilderStart({ onStart }: { onStart: (draft: BuilderDraft) => void }) {
+export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraft) => void; preset?: { platform: Platform; setup: Values } }) {
   const { workspace, org } = useWorkspace();
   const accounts = useWorkspaceAdAccounts(workspace.id);
   const orgAccounts = useAdAccounts(org.id);
   // Ad accounts in other workspaces of this organization, to point people at the right one.
   const elsewhere = (orgAccounts.data ?? []).filter((a) => a.workspaceId && a.workspaceId !== workspace.id);
   const otherWorkspaces = [...new Map(elsewhere.map((a) => [a.workspaceId!, { id: a.workspaceId!, name: a.workspaceName ?? "another workspace", count: elsewhere.filter((x) => x.workspaceId === a.workspaceId).length }])).values()];
-  const [platform, setPlatform] = useState<Platform | null>(null);
+  const [platform, setPlatform] = useState<Platform | null>(preset?.platform ?? null);
   const [accountId, setAccountId] = useState<string | null>(null);
-  const [setup, setSetup] = useState<Values>({});
+  const [setup, setSetup] = useState<Values>(preset?.setup ?? {});
   const [name, setName] = useState("");
 
   const byPlatform = (p: Platform) => (accounts.data ?? []).filter((a) => a.platform === p);
@@ -38,12 +38,23 @@ export function BuilderStart({ onStart }: { onStart: (draft: BuilderDraft) => vo
   const complete = Boolean(spec && account && !unchosen && name.trim().length >= 2);
   // Says what's still missing, so a greyed-out Continue never leaves people guessing.
   const missing = !platform ? null : !account ? "Select an ad account" : unchosen ? `Select the ${unchosen.label.toLowerCase()}` : name.trim().length < 2 ? "Name your campaign" : null;
+  const locked = Boolean(preset?.platform);
 
   if (accounts.isLoading) return <Skeleton className="h-[480px] rounded-xl" />;
 
   return (
     <Card className="gap-0 py-0">
       <div className="space-y-8 p-6 sm:p-8">
+        {locked && platform && platformAccounts.length === 0 && (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
+            <div className="font-medium">Connect {PLATFORM_INFO[platform].name} to publish this form.</div>
+            <p className="mt-0.5 text-muted-foreground">The fields below are the same ones {PLATFORM_INFO[platform].name} asks for. Connect an account in this workspace when you are ready to create the ad.</p>
+            <Button asChild size="sm" className="mt-3" variant="outline">
+              <Link href={`/w/${workspace.id}/integrations`}><Link2 /> Connect {PLATFORM_INFO[platform].name}</Link>
+            </Button>
+          </div>
+        )}
+        {!locked && (
         <section className="space-y-3">
           <div>
             <h2 className="text-lg font-semibold tracking-tight">Where do you want to advertise?</h2>
@@ -96,6 +107,7 @@ export function BuilderStart({ onStart }: { onStart: (draft: BuilderDraft) => vo
             </div>
           )}
         </section>
+        )}
 
         {spec && platformAccounts.length > 1 && (
           <section className="space-y-3 animate-fade-up">

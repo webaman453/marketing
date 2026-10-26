@@ -34,6 +34,22 @@ function defaultPlacements(platform: Platform, objective: string | null): Placem
       return ["snap_story"];
     case "PINTEREST":
       return ["pinterest_grid", "pinterest_closeup"];
+    case "AMAZON":
+      return o.includes("BRAND") || o.includes("DISPLAY") ? ["google_display", "google_shopping"] : ["google_search_mobile", "google_shopping"];
+    case "X":
+      return ["linkedin_feed", "tiktok_feed"];
+    case "APPLE":
+      return ["google_search_mobile"];
+    case "SPOTIFY":
+      return o.includes("DISPLAY") ? ["google_display"] : ["youtube_instream", "google_display"];
+    case "CRITEO":
+      return ["google_display", "google_display_native"];
+    case "TABOOLA":
+    case "OUTBRAIN":
+      return ["google_display_native", "discover"];
+    case "TRADEDESK":
+    case "YAHOO":
+      return o.includes("VIDEO") ? ["youtube_instream"] : o.includes("NATIVE") ? ["google_display_native"] : ["google_display"];
   }
 }
 

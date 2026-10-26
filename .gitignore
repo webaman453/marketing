@@ -8,6 +8,7 @@ dist
 .turbo
 *.log
 .DS_Store
+._*
 coverage
 next-env.d.ts
 packages/db/src/generated

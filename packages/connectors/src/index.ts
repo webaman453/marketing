@@ -8,6 +8,15 @@ import { MicrosoftAdsConnector, type MicrosoftConfig } from "./microsoft";
 import { PinterestConnector, type PinterestConfig } from "./pinterest";
 import { SnapchatConnector, type SnapchatConfig } from "./snapchat";
 import { TikTokConnector, type TikTokConfig } from "./tiktok";
+import { AmazonAdsConnector, type AmazonConfig } from "./amazon";
+import { AppleAdsConnector, type AppleConfig } from "./apple";
+import { CriteoConnector, type CriteoConfig } from "./criteo";
+import { OutbrainConnector, type OutbrainConfig } from "./outbrain";
+import { SpotifyAdsConnector, type SpotifyConfig } from "./spotify";
+import { TaboolaConnector, type TaboolaConfig } from "./taboola";
+import { TradeDeskConnector, type TradeDeskConfig } from "./tradedesk";
+import { XAdsConnector, type XConfig } from "./x";
+import { YahooDspConnector, type YahooConfig } from "./yahoo";
 import type { AdPlatformConnector } from "./types";
 
 export * from "./types";
@@ -19,6 +28,15 @@ export { LinkedInConnector } from "./linkedin";
 export { MicrosoftAdsConnector } from "./microsoft";
 export { SnapchatConnector } from "./snapchat";
 export { PinterestConnector } from "./pinterest";
+export { AmazonAdsConnector } from "./amazon";
+export { XAdsConnector } from "./x";
+export { AppleAdsConnector } from "./apple";
+export { SpotifyAdsConnector } from "./spotify";
+export { CriteoConnector } from "./criteo";
+export { TaboolaConnector } from "./taboola";
+export { OutbrainConnector } from "./outbrain";
+export { TradeDeskConnector } from "./tradedesk";
+export { YahooDspConnector } from "./yahoo";
 export { DemoConnector, DEMO_ACCOUNTS, DEMO_PLATFORMS, generateDemoMetrics, generateDemoStructure } from "./demo";
 
 export interface ConnectorsConfig {
@@ -29,6 +47,15 @@ export interface ConnectorsConfig {
   microsoft: MicrosoftConfig;
   snapchat: SnapchatConfig;
   pinterest: PinterestConfig;
+  amazon: AmazonConfig;
+  x: XConfig;
+  apple: AppleConfig;
+  spotify: SpotifyConfig;
+  criteo: CriteoConfig;
+  taboola: TaboolaConfig;
+  outbrain: OutbrainConfig;
+  tradedesk: TradeDeskConfig;
+  yahoo: YahooConfig;
 }
 
 export interface ConnectorRegistry {
@@ -48,6 +75,15 @@ export function createConnectorRegistry(config: ConnectorsConfig): ConnectorRegi
     MICROSOFT: new MicrosoftAdsConnector(config.microsoft),
     SNAPCHAT: new SnapchatConnector(config.snapchat),
     PINTEREST: new PinterestConnector(config.pinterest),
+    AMAZON: new AmazonAdsConnector(config.amazon),
+    X: new XAdsConnector(config.x),
+    APPLE: new AppleAdsConnector(config.apple),
+    SPOTIFY: new SpotifyAdsConnector(config.spotify),
+    CRITEO: new CriteoConnector(config.criteo),
+    TABOOLA: new TaboolaConnector(config.taboola),
+    OUTBRAIN: new OutbrainConnector(config.outbrain),
+    TRADEDESK: new TradeDeskConnector(config.tradedesk),
+    YAHOO: new YahooDspConnector(config.yahoo),
   };
   const demo = new Map<Platform, DemoConnector>();
 
