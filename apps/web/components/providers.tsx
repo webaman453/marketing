@@ -8,7 +8,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError } from "@/lib/api";
 import { CatalogLoader } from "@/lib/catalog";
 import { useDateRangeStore } from "@/lib/date-range";
-import { NexusThemeProvider } from "@/components/nexus-theme-provider";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -32,11 +31,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delayDuration={200}>
-          <NexusThemeProvider>
-            <CatalogLoader />
-            {children}
-            <Toaster position="bottom-right" richColors closeButton />
-          </NexusThemeProvider>
+          <CatalogLoader />
+          {children}
+          <Toaster position="bottom-right" richColors closeButton />
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>
