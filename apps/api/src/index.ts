@@ -11,10 +11,16 @@ const { loadPlatformSettings } = await import("@ashniva/core");
 // Keys and prices saved in the admin console override .env from the first request on.
 await loadPlatformSettings(true).catch((err: unknown) => logger.error({ err }, "Couldn't load platform settings; using .env only"));
 
+const { centralControlService } = await import("./modules/central-control/service");
+
 const port = config().API_PORT;
 const server = createApp().listen(port, () => {
   logger.info(`API ready on http://localhost:${port}`);
 });
+
+void centralControlService.start().catch((err: unknown) =>
+  logger.warn({ err }, "Central Control connector failed to start"),
+);
 
 async function shutdown(signal: string) {
   logger.info(`${signal} received, shutting down`);

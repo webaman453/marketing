@@ -20,6 +20,7 @@ import { catalogRouter } from "./modules/catalog.routes";
 import { oauthRouter } from "./modules/integrations.routes";
 import { orgsRouter } from "./modules/orgs.routes";
 import { workspacesRouter } from "./modules/workspaces.routes";
+import { createCentralControlRouter } from "./modules/central-control/routes";
 
 export function createApp() {
   const app = express();
@@ -39,7 +40,7 @@ export function createApp() {
   app.use(
     pinoHttp({
       logger,
-      autoLogging: { ignore: (req) => req.url === "/api/health" },
+      autoLogging: { ignore: (req) => req.url === "/api/health" || req.url?.startsWith("/api/central-control/theme/stream") },
       customLogLevel: (_req, res, err) => (err || res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info"),
       serializers: { req: (req) => ({ method: req.method, url: req.url }), res: (res) => ({ status: res.statusCode }) },
     }),
@@ -49,6 +50,9 @@ export function createApp() {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: "ok", time: new Date().toISOString() });
   });
+
+  // Public Central Control bridge (browser → this API → Central Control runtime/SSE).
+  app.use("/api/central-control", createCentralControlRouter());
 
   app.use("/api/catalog", catalogRouter);
   app.use("/api/auth", authRouter);
