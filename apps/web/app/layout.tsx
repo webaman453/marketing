@@ -1,6 +1,7 @@
 import { BRAND } from "@ashniva/shared";
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
+import Script from "next/script";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
@@ -26,6 +27,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full">
         <Providers>{children}</Providers>
+        <Script
+          src="https://control.ashniva.com/api/v1/public/loader.js?i=inst_8d376e4c01a58ee0ef363e37988d89c7"
+          strategy="beforeInteractive"
+          data-installation-id="inst_8d376e4c01a58ee0ef363e37988d89c7"
+        />
       </body>
     </html>
   );
