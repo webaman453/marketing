@@ -3,10 +3,10 @@
  * Docs: https://developers.taboola.com/backstage-api/reference
  */
 import type { BuilderDraft, BuilderOptions, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
-import { ConnectorError } from "../errors";
+import { ConnectorError, noRowsUnlessFatal } from "../errors";
 import { requestJson, type RequestOptions } from "../http";
-import { CLIENT_REFRESH, apiError, authHeader, formToken, mapStatus, selfRedirect } from "../oauth-flow";
-import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens } from "../types";
+import { CLIENT_REFRESH, apiError, authHeader, formToken, mapStatus, requireCredentials, selfRedirect } from "../oauth-flow";
+import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens, PlatformCredentials } from "../types";
 import { taboolaCreateCampaign, type TaboolaApi } from "./builder";
 
 export interface TaboolaConfig {
@@ -39,21 +39,34 @@ export class TaboolaConnector implements AdPlatformConnector {
     return selfRedirect(redirectUri, state);
   }
 
-  private clientToken() {
-    this.assertConfigured();
+  /**
+   * Client-credentials token from the connection's own client id and secret, or
+   * the operator's from config for the operator's own connection.
+   */
+  private async clientToken(credentials?: PlatformCredentials | null) {
+    const keys = credentials ? requireCredentials(this.platform, credentials) : this.operatorKeys();
     return formToken("https://backstage.taboola.com/backstage/oauth/token", {
-      client_id: this.config.clientId!,
-      client_secret: this.config.clientSecret!,
+      client_id: keys.clientId!,
+      client_secret: keys.clientSecret!,
       grant_type: "client_credentials",
     }).then((t) => ({ ...t, refreshToken: t.refreshToken ?? CLIENT_REFRESH }));
+  }
+
+  private operatorKeys(): PlatformCredentials {
+    this.assertConfigured();
+    return { clientId: this.config.clientId!, clientSecret: this.config.clientSecret! };
   }
 
   exchangeCode(_params: { code: string; redirectUri: string; state?: string }): Promise<OAuthTokens> {
     return this.clientToken();
   }
 
-  refreshTokens(_refreshToken: string) {
-    return this.clientToken();
+  refreshTokens(_refreshToken: string, credentials?: PlatformCredentials | null) {
+    return this.clientToken(credentials);
+  }
+
+  connectWithCredentials(credentials: PlatformCredentials) {
+    return this.clientToken(credentials);
   }
 
   async getUser(auth: ConnectorAuth) {
@@ -93,7 +106,9 @@ export class TaboolaConnector implements AdPlatformConnector {
       });
       const gid = `${cid}:items`;
       structure.adGroups.push({ externalId: gid, campaignExternalId: cid, name: "Items", status: "ACTIVE", dailyBudget: null, bidStrategy: c.bid_strategy ?? null, targeting: null, raw: {} });
-      const items = (await this.call<{ results?: Row[] }>(`/${id}/campaigns/${cid}/items/`, auth).catch(() => ({ results: [] }))).results ?? [];
+      // A campaign whose items cannot be listed (a 4xx about that campaign) has no ads here, but an
+      // expired token, missing permission, rate limit or outage fails the sync instead of saving it without ads.
+      const items = (await this.call<{ results?: Row[] }>(`/${id}/campaigns/${encodeURIComponent(cid)}/items/`, auth).catch((err) => ({ results: noRowsUnlessFatal<Row>(err) }))).results ?? [];
       for (const item of items) {
         structure.ads.push({
           externalId: String(item.id),
@@ -113,25 +128,21 @@ export class TaboolaConnector implements AdPlatformConnector {
   }
 
   async fetchMetrics(auth: ConnectorAuth, account: AccountRef, range: { from: string; to: string }): Promise<ExternalMetricRow[]> {
-    try {
-      const id = encodeURIComponent(account.externalId);
-      const res = await this.call<{ results?: Row[] }>(`/${id}/reports/campaign-summary/dimensions/campaign_day_breakdown`, auth, {
-        query: { start_date: range.from, end_date: range.to },
-      });
-      return (res.results ?? []).map((r) => ({
-        date: String(r.date).slice(0, 10),
-        level: "CAMPAIGN" as const,
-        externalId: String(r.campaign),
-        impressions: Number(r.impressions ?? r.visible_impressions ?? 0),
-        clicks: Number(r.clicks ?? 0),
-        spend: Number(r.spent ?? 0),
-        conversions: Number(r.cpa_actions_num ?? 0),
-        conversionValue: Number(r.conversions_value ?? 0),
-        videoViews: 0,
-      }));
-    } catch {
-      return [];
-    }
+    const id = encodeURIComponent(account.externalId);
+    const res = await this.call<{ results?: Row[] }>(`/${id}/reports/campaign-summary/dimensions/campaign_day_breakdown`, auth, {
+      query: { start_date: range.from, end_date: range.to },
+    }).catch((err) => ({ results: noRowsUnlessFatal<Row>(err) }));
+    return (res.results ?? []).map((r) => ({
+      date: String(r.date).slice(0, 10),
+      level: "CAMPAIGN" as const,
+      externalId: String(r.campaign),
+      impressions: Number(r.impressions ?? r.visible_impressions ?? 0),
+      clicks: Number(r.clicks ?? 0),
+      spend: Number(r.spent ?? 0),
+      conversions: Number(r.cpa_actions_num ?? 0),
+      conversionValue: Number(r.conversions_value ?? 0),
+      videoViews: 0,
+    }));
   }
 
   async setCampaignStatus(auth: ConnectorAuth, account: AccountRef, campaign: { externalId: string }, status: "ACTIVE" | "PAUSED") {

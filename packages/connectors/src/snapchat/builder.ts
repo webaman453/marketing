@@ -3,7 +3,7 @@
  * campaign → ad squads → media → creatives → ads. Rolled back on failure.
  */
 import { type BuilderDraft, type BuilderOptions, type TargetingKind, type TargetingSearchResult, type Values } from "@ashniva/shared";
-import { bool, budgetOf, countryCodes, dateOf, included, mediaOf, num, placements, range, str, strs } from "../builder-values";
+import { bool, budgetOf, builderZone, countryCodes, dayIn, dayOf, included, instantOf, mediaOf, num, placements, range, str, strs } from "../builder-values";
 import { ConnectorError } from "../errors";
 import type { AccountStructure, BuilderAsset } from "../types";
 
@@ -92,12 +92,20 @@ function targeting(v: Values) {
   return t;
 }
 
-export async function snapCreateCampaign(api: SnapApi, account: { externalId: string; currency: string }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
+/** The app an install or deep-link ad opens: an Android package name ("com.x.y") or an iOS App Store id. */
+function appProperties(a: Values) {
+  const appId = str(a, "appId");
+  return { app_name: str(a, "brandName"), ...(appId.includes(".") ? { android_app_url: appId } : { ios_app_id: appId }) };
+}
+
+export async function snapCreateCampaign(api: SnapApi, account: { externalId: string; currency: string; timezone?: string | null }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
   const acct = account.externalId;
   const c = draft.campaign;
   const status = c.launchStatus === "ACTIVE" ? "ACTIVE" : "PAUSED";
-  const start = dateOf(c, "startDate") ?? new Date(Date.now() + 5 * 60_000);
-  const end = dateOf(c, "endDate");
+  // Dates are days in the ad account's zone: start of the start day, end of the end day.
+  const tz = builderZone(account);
+  const start = instantOf(c, "startDate", tz) ?? new Date(Date.now() + 5 * 60_000);
+  const end = instantOf(c, "endDate", tz, "end");
 
   const campaign = first(
     await api.post(`/adaccounts/${acct}/campaigns`, {
@@ -119,7 +127,7 @@ export async function snapCreateCampaign(api: SnapApi, account: { externalId: st
   );
   const campaignId = String(campaign.id);
   const structure: AccountStructure = {
-    campaigns: [{ externalId: campaignId, name: str(c, "name"), status, deliveryStatus: null, objective: String(draft.setup.objective), dailyBudget: null, lifetimeBudget: null, startDate: start.toISOString().slice(0, 10), endDate: end ? end.toISOString().slice(0, 10) : null, updatedAt: new Date(), raw: {} }],
+    campaigns: [{ externalId: campaignId, name: str(c, "name"), status, deliveryStatus: null, objective: String(draft.setup.objective), dailyBudget: null, lifetimeBudget: null, startDate: dayOf(c, "startDate") ?? dayIn(start, tz), endDate: dayOf(c, "endDate"), updatedAt: new Date(), raw: {} }],
     adGroups: [],
     ads: [],
   };
@@ -130,8 +138,9 @@ export async function snapCreateCampaign(api: SnapApi, account: { externalId: st
       const budget = budgetOf(v);
       if (!budget) throw new ConnectorError("INVALID_REQUEST", `Enter a budget for ad squad “${str(v, "name")}”.`);
       const p = placements(v, "placements");
-      const gStart = dateOf(v, "startDate") ?? start;
-      const gEnd = dateOf(v, "endDate") ?? end;
+      // The schedule lives on the campaign (the ad squad form has none): squads run for its dates.
+      const gStart = start;
+      const gEnd = end;
       const bid = str(v, "bidStrategy") || "AUTO_BID";
       const squad = first(
         await api.post(`/campaigns/${campaignId}/adsquads`, {
@@ -173,8 +182,9 @@ export async function snapCreateCampaign(api: SnapApi, account: { externalId: st
           shareable: bool(a, "shareable") || a.shareable === undefined,
           ...(attachment !== "NONE" ? { call_to_action: str(a, "cta") || "MORE" } : {}),
           ...(attachment === "WEB_VIEW" ? { web_view_properties: { url: str(a, "url") } } : {}),
-          ...(attachment === "APP_INSTALL" ? { app_install_properties: { app_name: str(a, "brandName"), ...(String(str(a, "appId")).includes(".") ? { android_app_url: str(a, "appId") } : { ios_app_id: str(a, "appId") }) } } : {}),
-          ...(attachment === "DEEP_LINK" ? { deep_link_properties: { deep_link_uri: str(a, "deeplink") } } : {}),
+          ...(attachment === "APP_INSTALL" ? { app_install_properties: appProperties(a) } : {}),
+          // DeepLinkProperties carry the app as well as the URI (app_name + ios_app_id / android_app_url).
+          ...(attachment === "DEEP_LINK" ? { deep_link_properties: { deep_link_uri: str(a, "deeplink"), ...appProperties(a) } } : {}),
           ...(attachment === "LEAD_GENERATION" ? { lead_generation_properties: { lead_generation_form_id: str(a, "leadFormId") } } : {}),
         };
         let creativeId: string;

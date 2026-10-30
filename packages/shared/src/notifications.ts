@@ -22,6 +22,11 @@ export const NOTIFICATION_PREFS = [
     label: "Sync failures",
     description: "When an ad platform connection stops syncing or its access expires. Owners and admins only.",
   },
+  {
+    key: "spendAlerts",
+    label: "Spend and billing alerts",
+    description: "When an ad account nears or reaches its monthly budget, or its platform reports a payment problem.",
+  },
 ] as const;
 
 export type NotificationPrefKey = (typeof NOTIFICATION_PREFS)[number]["key"];
@@ -32,6 +37,7 @@ export const notificationPrefsSchema = z.object({
   reportCopies: z.boolean(),
   lowAiBalance: z.boolean(),
   syncFailures: z.boolean(),
+  spendAlerts: z.boolean(),
 }) satisfies z.ZodType<NotificationPrefsDTO>;
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefsDTO = {
@@ -39,4 +45,5 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefsDTO = {
   reportCopies: true,
   lowAiBalance: true,
   syncFailures: true,
+  spendAlerts: true,
 };

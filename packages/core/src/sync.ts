@@ -4,16 +4,19 @@
  */
 import {
   isConnectorError,
+  removalAllowed,
   type AccountStructure,
+  type ConnectorAuth,
   type ExternalMetricRow,
 } from "@ashniva/connectors";
 import { prisma, Prisma, type AdAccount, type PlatformConnection } from "@ashniva/db";
 import { PLATFORM_INFO, addDays, toISODate } from "@ashniva/shared";
 import { syncLeads } from "./leads";
-import { notify } from "./notifications";
+import { refreshConnectionBilling } from "./spend";
+import { connectionAlertTarget, notify } from "./notifications";
 import { connectors } from "./connectors";
 import type { SyncTrigger } from "./queue";
-import { getAccessToken } from "./tokens";
+import { getConnectorAuth } from "./tokens";
 
 /** Platforms restate recent days as attribution settles, so re-fetch this many days every sync. */
 const RESTATEMENT_DAYS = 7;
@@ -28,6 +31,8 @@ export interface SyncStats {
   leads?: number;
   /** Why leads could not be read, when everything else synced fine. */
   leadsError?: string;
+  /** Non-fatal problems, e.g. a removal pass skipped by the safety net. */
+  warnings?: string[];
 }
 
 export async function syncConnection(connectionId: string, trigger: SyncTrigger): Promise<SyncStats> {
@@ -40,27 +45,33 @@ export async function syncConnection(connectionId: string, trigger: SyncTrigger)
 
   const stats = emptyStats();
   try {
-    const token = await getAccessToken(connection);
-    await refreshAdAccounts(connection, token);
+    const auth = await getConnectorAuth(connection);
+    await refreshAdAccounts(connection, auth);
 
     // Only accounts assigned to a workspace are synced, which keeps API quota for what people use.
     const accounts = await prisma.adAccount.findMany({
       where: { connectionId, workspaceId: { not: null } },
     });
     for (const account of accounts) {
-      const s = await syncAdAccount(connection, account, token);
+      const s = await syncAdAccount(connection, account, auth);
       stats.accounts++;
       stats.campaigns += s.campaigns;
       stats.adGroups += s.adGroups;
       stats.ads += s.ads;
       stats.metricRows += s.metricRows;
+      if (s.warning) (stats.warnings ??= []).push(s.warning);
     }
 
     try {
-      stats.leads = await syncLeads(connection, token);
+      stats.leads = await syncLeads(connection, auth);
     } catch (err) {
       stats.leadsError = (err instanceof Error ? err.message : String(err)).slice(0, 300);
     }
+
+    // Spend cap, balance and payment state, for platforms that report them. Never fails the sync.
+    await refreshConnectionBilling(connection, auth).catch((err: unknown) => {
+      (stats.warnings ??= []).push(`Billing: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`);
+    });
 
     const now = new Date();
     await prisma.$transaction([
@@ -79,26 +90,38 @@ export async function syncConnection(connectionId: string, trigger: SyncTrigger)
     const expired = isConnectorError(err) && err.code === "AUTH_EXPIRED";
     if (expired && connection.status === "ACTIVE") {
       // Tell admins once, when access first lapses.
-      await notify({
-        orgId: connection.orgId,
-        type: "integration.expired",
-        title: `${PLATFORM_INFO[connection.platform].name} access expired`,
-        body: `${connection.externalUserName ?? "A connected login"} needs to be reconnected. Data from its ad accounts has stopped syncing.`,
-        roles: ["OWNER", "ADMIN"],
-        email: true,
-        emailPref: "syncFailures",
-      }).catch(() => undefined);
+      await connectionAlertTarget(connection)
+        .then((target) =>
+          notify({
+            orgId: connection.orgId,
+            ...target,
+            type: "integration.expired",
+            title: `${PLATFORM_INFO[connection.platform].name} access expired`,
+            body: `${connection.externalUserName ?? "A connected login"} needs to be reconnected. Data from its ad accounts has stopped syncing.`,
+            ctaLabel: "Reconnect",
+            roles: ["OWNER", "ADMIN"],
+            email: true,
+            emailPref: "syncFailures",
+          }),
+        )
+        .catch(() => undefined);
     } else if (!expired && !connection.lastSyncError && connection.mode === "LIVE") {
       // First failure since the last good sync; retries and later failures stay quiet.
-      await notify({
-        orgId: connection.orgId,
-        type: "integration.sync_failed",
-        title: `${PLATFORM_INFO[connection.platform].name} sync failed`,
-        body: `${connection.externalUserName ?? "A connected login"} couldn't sync: ${message.slice(0, 300)}`,
-        roles: ["OWNER", "ADMIN"],
-        email: true,
-        emailPref: "syncFailures",
-      }).catch(() => undefined);
+      await connectionAlertTarget(connection)
+        .then((target) =>
+          notify({
+            orgId: connection.orgId,
+            ...target,
+            type: "integration.sync_failed",
+            title: `${PLATFORM_INFO[connection.platform].name} sync failed`,
+            body: `${connection.externalUserName ?? "A connected login"} couldn't sync: ${message.slice(0, 300)}`,
+            ctaLabel: "View integrations",
+            roles: ["OWNER", "ADMIN"],
+            email: true,
+            emailPref: "syncFailures",
+          }),
+        )
+        .catch(() => undefined);
     }
     await prisma.$transaction([
       prisma.platformConnection.update({
@@ -121,9 +144,9 @@ export async function syncConnection(connectionId: string, trigger: SyncTrigger)
 const emptyStats = (): SyncStats => ({ accounts: 0, campaigns: 0, adGroups: 0, ads: 0, metricRows: 0 });
 
 /** Upserts the ad accounts visible to this login. New accounts arrive unassigned. */
-export async function refreshAdAccounts(connection: PlatformConnection, token: string, assignToWorkspaceId?: string) {
+export async function refreshAdAccounts(connection: PlatformConnection, auth: ConnectorAuth, assignToWorkspaceId?: string) {
   const connector = connectors().get(connection.platform, connection.mode);
-  const external = await connector.listAdAccounts({ accessToken: token });
+  const external = await connector.listAdAccounts(auth);
   for (const a of external) {
     await prisma.adAccount.upsert({
       where: {
@@ -154,13 +177,15 @@ export async function refreshAdAccounts(connection: PlatformConnection, token: s
   return external.length;
 }
 
-async function syncAdAccount(connection: PlatformConnection, account: AdAccount, token: string) {
+async function syncAdAccount(connection: PlatformConnection, account: AdAccount, auth: ConnectorAuth) {
   const connector = connectors().get(connection.platform, connection.mode);
-  const ref = { externalId: account.externalId, currency: account.currency, meta: account.meta as Record<string, unknown> | null };
-  const auth = { accessToken: token };
+  const ref = { externalId: account.externalId, currency: account.currency, timezone: account.timezone, meta: account.meta as Record<string, unknown> | null };
 
   const structure = await connector.fetchStructure(auth, ref);
-  const ids = await upsertStructure(account, structure, connection.mode === "DEMO");
+  const isDemo = connection.mode === "DEMO";
+  const ids = await upsertStructure(account, structure, isDemo);
+  // Sample accounts also hold campaigns made in the builder, which the generator doesn't know about.
+  const warning = isDemo ? null : await markRemovedCampaigns(account, [...ids.campaigns.keys()]);
 
   const today = toISODate(new Date());
   const initialDays = Number(process.env.INITIAL_SYNC_DAYS ?? 90);
@@ -174,7 +199,30 @@ async function syncAdAccount(connection: PlatformConnection, account: AdAccount,
     adGroups: structure.adGroups.length,
     ads: structure.ads.length,
     metricRows,
+    warning,
   };
+}
+
+/**
+ * Campaigns that no longer come back from the platform were deleted there.
+ * Only called with a full structure sync, never with a partial one (e.g. a
+ * campaign just made in the builder). Safety net: an empty list for an account
+ * that still has campaigns is far more likely a platform/API hiccup than every
+ * campaign being deleted, so nothing is removed in that run.
+ */
+async function markRemovedCampaigns(account: AdAccount, seen: string[]): Promise<string | null> {
+  const onRecord = seen.length ? 0 : await prisma.campaign.count({ where: { adAccountId: account.id, status: { not: "REMOVED" } } });
+  if (!removalAllowed(seen.length, onRecord)) {
+    const warning = `${account.name}: the platform returned no campaigns while ${onRecord} are on record; none were marked removed.`;
+    console.warn(`[sync] ${warning} (adAccount ${account.id})`);
+    return warning;
+  }
+  if (seen.length === 0) return null;
+  await prisma.campaign.updateMany({
+    where: { adAccountId: account.id, externalId: { notIn: seen }, status: { not: "REMOVED" } },
+    data: { status: "REMOVED" },
+  });
+  return null;
 }
 
 interface IdMaps {
@@ -189,6 +237,8 @@ const date = (v: string | null) => (v ? new Date(`${v}T00:00:00Z`) : null);
 /**
  * Upserts campaigns → ad groups → ads and returns external→internal id maps.
  * For sample data, status and budget edits made in the app are preserved.
+ * Never removes anything: `s` may be partial (the builder passes just the new
+ * campaign); a full sync marks missing campaigns via markRemovedCampaigns.
  */
 export async function upsertStructure(account: AdAccount, s: AccountStructure, keepLocalEdits: boolean): Promise<IdMaps> {
   const campaigns = new Map<string, string>();
@@ -215,13 +265,6 @@ export async function upsertStructure(account: AdAccount, s: AccountStructure, k
     );
     for (const c of saved) campaigns.set(c.externalId, c.id);
   }
-
-  // Campaigns that no longer come back from the platform were deleted there.
-  // (Sample accounts also hold campaigns made in the builder, which the generator doesn't know about.)
-  if (!keepLocalEdits) await prisma.campaign.updateMany({
-    where: { adAccountId: account.id, externalId: { notIn: [...campaigns.keys()] }, status: { not: "REMOVED" } },
-    data: { status: "REMOVED" },
-  });
 
   const adGroups = new Map<string, { id: string; campaignId: string }>();
   const groupList = s.adGroups.filter((g) => campaigns.has(g.campaignExternalId));

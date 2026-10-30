@@ -6,7 +6,6 @@ import {
   BUILDER_SPECS,
   COUNTRIES,
   listTexts,
-  toISODate,
   type BuilderDraft,
   type BuilderOptions,
   type Platform,
@@ -15,7 +14,7 @@ import {
   type Values,
 } from "@ashniva/shared";
 import { randomBytes } from "node:crypto";
-import { budgetOf, dateOf, isoDate, repeater, str } from "../builder-values";
+import { budgetOf, dayIn, dayOf, repeater, str } from "../builder-values";
 import type { AccountStructure, ExternalAd } from "../types";
 
 const item = (id: string, name: string, detail?: string) => ({ id, name, detail });
@@ -106,14 +105,15 @@ const HEADLINE_KEYS = ["headlines", "headline", "title", "textHeadline", "subjec
 const BODY_KEYS = ["primaryTexts", "introText", "adText", "descriptions", "description", "textDescription", "messageBody"];
 const URL_KEYS = ["url", "finalUrl"];
 
-export function demoCreateCampaign(accountExternalId: string, draft: BuilderDraft): AccountStructure {
+/** `timeZone` is the ad account's: a campaign with no start date starts today there. */
+export function demoCreateCampaign(accountExternalId: string, draft: BuilderDraft, timeZone = "UTC"): AccountStructure {
   const spec = BUILDER_SPECS[draft.platform];
   const id = `${accountExternalId}-new-${randomBytes(4).toString("hex")}`;
   const status = draft.campaign.launchStatus === "ACTIVE" ? "ACTIVE" : "PAUSED";
   const campaignBudget = budgetOf(draft.campaign);
   const objective = String(draft.setup.objective ?? draft.setup.goal ?? draft.setup.campaignType ?? "");
-  const start = dateOf(draft.campaign, "startDate") ?? dateOf(draft.adGroups[0]?.values ?? {}, "startDate");
-  const end = dateOf(draft.campaign, "endDate") ?? dateOf(draft.adGroups[0]?.values ?? {}, "endDate");
+  const start = dayOf(draft.campaign, "startDate") ?? dayOf(draft.adGroups[0]?.values ?? {}, "startDate");
+  const end = dayOf(draft.campaign, "endDate") ?? dayOf(draft.adGroups[0]?.values ?? {}, "endDate");
 
   const structure: AccountStructure = {
     campaigns: [
@@ -125,8 +125,8 @@ export function demoCreateCampaign(accountExternalId: string, draft: BuilderDraf
         objective: draft.setup.campaignType ? `${draft.setup.campaignType}` : objective,
         dailyBudget: campaignBudget && !campaignBudget.lifetime ? campaignBudget.amount : null,
         lifetimeBudget: campaignBudget?.lifetime ? campaignBudget.amount : null,
-        startDate: isoDate(start) ?? toISODate(new Date()),
-        endDate: isoDate(end),
+        startDate: start ?? dayIn(new Date(), timeZone),
+        endDate: end,
         updatedAt: new Date(),
         raw: { sample: true, builder: true, setup: draft.setup, daily_budget: campaignBudget?.amount ?? null },
       },

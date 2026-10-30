@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 
 const API_URL = process.env.API_URL ?? "http://localhost:4100";
 
+const FRAME_ANCESTORS = [
+  "'self'",
+  "https://control.ashniva.com",
+  ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:3200", "http://127.0.0.1:3200"]),
+];
+
 const nextConfig: NextConfig = {
   // The dashboard is client-rendered behind auth, so partial prerendering
   // (cacheComponents) adds little and would force Suspense around URL hooks.
@@ -28,10 +34,8 @@ const nextConfig: NextConfig = {
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          {
-            key: "Content-Security-Policy",
-            value: "frame-ancestors 'self' https://control.ashniva.com http://localhost:3200 http://127.0.0.1:3200",
-          },
+          // Central Control's Theme Studio may frame the site; its local dev server only outside production.
+          { key: "Content-Security-Policy", value: `frame-ancestors ${FRAME_ANCESTORS.join(" ")}` },
         ],
       },
     ];

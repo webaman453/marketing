@@ -10,6 +10,7 @@ import { EmptyState, ErrorState } from "@/components/app/states";
 import { useWorkspace } from "@/components/app/workspace-context";
 import { DraftsList } from "@/components/builder/drafts-list";
 import { CampaignsTable } from "@/components/campaigns/campaigns-table";
+import { FxNote } from "@/components/campaigns/fx-note";
 import { PlatformIcon } from "@/components/platform-icon";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -48,6 +49,8 @@ export default function CampaignsPage() {
   );
   const filtered = search !== "" || platform !== ALL || status !== ALL || adAccountId !== ALL;
   const data = campaigns.data;
+  // The API leaves out hidden platforms; filter the rows here as well, but keep its totals as sent.
+  const rows = useMemo(() => (data?.campaigns ?? []).filter((c) => isPlatformShown(c.platform)), [data]);
 
   if (accounts.data && shownAccounts.length === 0) {
     return (
@@ -94,7 +97,7 @@ export default function CampaignsPage() {
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-4 animate-fade-up">
           {[
             { label: "Spend", value: moneyCompact(data.totals.spend, data.currency), full: money(data.totals.spend, data.currency) },
-            { label: "Conversions", value: number(data.totals.conversions), full: number(data.totals.conversions, { decimals: 1 }) },
+            { label: "Conversions", value: number(data.totals.conversions, { currency: data.currency }), full: number(data.totals.conversions, { decimals: 1, currency: data.currency }) },
             { label: "Cost / conv.", value: money(data.totals.cpa, data.currency, { decimals: 0 }), full: money(data.totals.cpa, data.currency) },
             { label: "ROAS", value: multiple(data.totals.roas), full: multiple(data.totals.roas) },
           ].map((s) => (
@@ -105,6 +108,7 @@ export default function CampaignsPage() {
           ))}
         </div>
       )}
+      {data && <FxNote fx={data.fx} className="-mt-3" />}
 
       <Card className="gap-0 overflow-hidden py-0">
         <div className="flex flex-col gap-2 border-b p-3 lg:flex-row lg:items-center">
@@ -185,7 +189,7 @@ export default function CampaignsPage() {
               <Skeleton key={i} className="h-11 w-full" />
             ))}
           </div>
-        ) : data.campaigns.filter((c) => isPlatformShown(c.platform)).length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             icon={Megaphone}
             title={filtered ? "No campaigns match these filters" : "No campaigns yet"}
@@ -198,7 +202,7 @@ export default function CampaignsPage() {
         ) : (
           <div className={cn("transition-opacity", campaigns.isPlaceholderData && "opacity-60")}>
             <CampaignsTable
-              campaigns={data.campaigns.filter((c) => isPlatformShown(c.platform))}
+              campaigns={rows}
               totals={data.totals}
               currency={data.currency}
               workspaceId={workspace.id}

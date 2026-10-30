@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // macOS metadata files (AppleDouble) created on FAT/exFAT drives.
+    "**/._*",
   ]),
 ]);
 

@@ -4,7 +4,8 @@
  */
 import type { BuilderDraft, BuilderOptions, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { ConnectorError } from "../errors";
-import { requestJson, type RequestOptions } from "../http";
+import { splitBudget } from "../builder-values";
+import { allPages, requestJson, type RequestOptions } from "../http";
 import { apiError, authHeader, formToken, mapStatus } from "../oauth-flow";
 import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens } from "../types";
 import { spotifyCreateCampaign, type SpotifyApi } from "./builder";
@@ -16,6 +17,8 @@ export interface SpotifyConfig {
 
 const API = "https://api-partner.spotify.com/ads/v3";
 type Row = Record<string, any>;
+/** Ads API v3 list page size (the documented default and maximum `limit` is 50). */
+const PAGE_SIZE = 50;
 
 export class SpotifyAdsConnector implements AdPlatformConnector {
   readonly platform = "SPOTIFY" as const;
@@ -84,8 +87,7 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
   async listAdAccounts(auth: ConnectorAuth): Promise<ExternalAdAccount[]> {
     const accounts: ExternalAdAccount[] = [];
     for (const business of (await this.businesses(auth)).businesses ?? []) {
-      const res = await this.call<{ ad_accounts?: Row[] }>(`/businesses/${business.id}/ad_accounts`, auth);
-      for (const account of res.ad_accounts ?? []) {
+      for (const account of await this.listAll(`/businesses/${business.id}/ad_accounts`, "ad_accounts", auth)) {
         accounts.push({
           externalId: String(account.id),
           name: account.name ?? String(account.id),
@@ -102,12 +104,12 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
   async fetchStructure(auth: ConnectorAuth, account: AccountRef): Promise<AccountStructure> {
     const id = account.externalId;
     const [campaigns, sets, ads] = await Promise.all([
-      this.call<{ campaigns?: Row[] }>(`/ad_accounts/${id}/campaigns`, auth).catch(() => ({ campaigns: [] })),
-      this.call<{ ad_sets?: Row[] }>(`/ad_accounts/${id}/ad_sets`, auth).catch(() => ({ ad_sets: [] })),
-      this.call<{ ads?: Row[] }>(`/ad_accounts/${id}/ads`, auth).catch(() => ({ ads: [] })),
+      this.listAll(`/ad_accounts/${id}/campaigns`, "campaigns", auth),
+      this.listAll(`/ad_accounts/${id}/ad_sets`, "ad_sets", auth),
+      this.listAll(`/ad_accounts/${id}/ads`, "ads", auth),
     ]);
     return {
-      campaigns: (campaigns.campaigns ?? []).map((c) => ({
+      campaigns: campaigns.map((c) => ({
         externalId: String(c.id),
         name: c.name,
         status: mapStatus(c.status),
@@ -120,7 +122,7 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
         updatedAt: null,
         raw: {},
       })),
-      adGroups: (sets.ad_sets ?? []).map((g) => ({
+      adGroups: sets.map((g) => ({
         externalId: String(g.id),
         campaignExternalId: String(g.campaign_id),
         name: g.name,
@@ -130,7 +132,7 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
         targeting: null,
         raw: {},
       })),
-      ads: (ads.ads ?? []).map((a) => ({
+      ads: ads.map((a) => ({
         externalId: String(a.id),
         adGroupExternalId: String(a.ad_set_id),
         campaignExternalId: String(a.campaign_id ?? ""),
@@ -145,6 +147,21 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
     };
   }
 
+  /**
+   * Ads API v3 lists page with `limit`/`offset` and answer a `paging` object
+   * ({ page_size, total_results, offset }); follows them to the last page.
+   */
+  private listAll(path: string, key: string, auth: ConnectorAuth) {
+    const limit = PAGE_SIZE;
+    return allPages<Row, number>(0, async (offset) => {
+      const res = await this.call<Record<string, unknown> & { paging?: { total_results?: number } }>(path, auth, { query: { limit, offset } });
+      const rows = (res?.[key] as Row[] | undefined) ?? [];
+      const next = offset + rows.length;
+      const total = res?.paging?.total_results;
+      return { items: rows, next: total != null ? (next < Number(total) ? next : null) : rows.length >= limit ? next : null };
+    }, `Spotify ${key} list`);
+  }
+
   async fetchMetrics(): Promise<ExternalMetricRow[]> {
     return [];
   }
@@ -153,8 +170,15 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
     await this.call(`/ad_accounts/${account.externalId}/campaigns/${campaign.externalId}`, auth, { method: "PATCH", body: { status } });
   }
 
+  /** Budgets live on ad sets, so the campaign's daily amount is split evenly across them. */
   async setCampaignDailyBudget(auth: ConnectorAuth, account: AccountRef, campaign: { externalId: string }, amount: number) {
-    await this.call(`/ad_accounts/${account.externalId}/campaigns/${campaign.externalId}`, auth, { method: "PATCH", body: { budget: { micro_amount: Math.round(amount * 1_000_000), type: "DAILY" } } });
+    const id = account.externalId;
+    const sets = (await this.listAll(`/ad_accounts/${id}/ad_sets`, "ad_sets", auth)).filter((g) => String(g.campaign_id) === campaign.externalId);
+    if (!sets.length) throw new ConnectorError("INVALID_REQUEST", "This Spotify campaign has no ad sets to put the budget on.");
+    const each = splitBudget(amount, sets.length);
+    for (const set of sets) {
+      await this.call(`/ad_accounts/${id}/ad_sets/${set.id}`, auth, { method: "PATCH", body: { budget: { micro_amount: Math.round(each * 1_000_000), type: "DAILY" } } });
+    }
   }
 
   private api(auth: ConnectorAuth): SpotifyApi {

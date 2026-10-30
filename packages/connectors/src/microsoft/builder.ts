@@ -6,6 +6,7 @@
 import { LANGUAGES, countryName, type BuilderDraft, type BuilderOptions, type TargetingKind, type TargetingSearchResult, type TargetingValue, type Values } from "@ashniva/shared";
 import { budgetOf, excluded, included, keywords, mediaOf, num, pinned, repeater, str, strs, texts } from "../builder-values";
 import { ConnectorError } from "../errors";
+import { microsoftTimeZone } from "./timezones";
 import type { AccountStructure, BuilderAsset } from "../types";
 
 type Row = Record<string, any>;
@@ -68,17 +69,6 @@ export async function microsoftBuilderOptions(api: MicrosoftApi, accountId: stri
 
 // ───────── Mapping ─────────
 
-const TIMEZONES: Record<string, string> = {
-  "Asia/Kolkata": "ChennaiKolkataMumbaiNewDelhi",
-  "Asia/Calcutta": "ChennaiKolkataMumbaiNewDelhi",
-  "Asia/Dubai": "AbuDhabiMuscat",
-  "Asia/Singapore": "KualaLumpurSingapore",
-  "Europe/London": "GreenwichMeanTimeDublinEdinburghLisbonLondon",
-  "America/New_York": "EasternTimeUSCanada",
-  "America/Chicago": "CentralTimeUSCanada",
-  "America/Los_Angeles": "PacificTimeUSCanadaTijuana",
-  "Australia/Sydney": "CanberraMelbourneSydney",
-};
 
 function biddingScheme(c: Values) {
   const s = str(c, "bidStrategy") || "MaxConversions";
@@ -152,7 +142,7 @@ export async function microsoftCreateCampaign(
         BudgetType: "DailyBudgetStandard",
         DailyBudget: budget.amount,
         Status: status,
-        TimeZone: TIMEZONES[account.timezone ?? ""] ?? "EasternTimeUSCanada",
+        TimeZone: microsoftTimeZone(account.timezone),
         Languages: languages.length ? languages : ["English"],
         BiddingScheme: biddingScheme(c),
         ...(strs(c, "conversionGoals").length ? { GoalIds: strs(c, "conversionGoals").map(Number) } : {}),
@@ -276,7 +266,8 @@ export async function microsoftCreateCampaign(
               };
         const adRes = await api.call<{ AdIds?: number[] } & Row>("/Ads", { AdGroupId: Number(groupId), Ads: [body] });
         check(adRes, `Ad “${str(a, "name")}”`);
-        structure.ads.push({ externalId: String(adRes.AdIds?.[0] ?? ""), adGroupExternalId: groupId, campaignExternalId: campaignId, name: str(a, "name") || "Ad", status: "ACTIVE", headline: texts(a, "headlines")[0] ?? null, body: texts(a, "descriptions")[0] ?? null, thumbnailUrl: null, finalUrl: str(a, "finalUrl") || null, raw: {}, sourceKey: ad.key });
+        // Same "<adGroupId>~<adId>" id that fetchStructure and fetchMetrics use.
+        structure.ads.push({ externalId: `${groupId}~${adRes.AdIds?.[0] ?? ""}`, adGroupExternalId: groupId, campaignExternalId: campaignId, name: str(a, "name") || "Ad", status: "ACTIVE", headline: texts(a, "headlines")[0] ?? null, body: texts(a, "descriptions")[0] ?? null, thumbnailUrl: null, finalUrl: str(a, "finalUrl") || null, raw: {}, sourceKey: ad.key });
 
         // Extensions are account-level objects associated with the ad group.
         const extensions: Row[] = [

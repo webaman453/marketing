@@ -1,10 +1,11 @@
 "use client";
 
-import { PLATFORM_INFO, credentialGroupFor, isPlatformShown, type ConnectionDTO, type CredentialGroupId, type Platform } from "@ashniva/shared";
+import { CONNECT_CREDENTIALS, PLATFORM_INFO, credentialGroupFor, isPlatformShown, type ConnectionDTO, type CredentialGroupId, type Platform } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
+  CreditCard,
   FlaskConical,
   KeyRound,
   Loader2,
@@ -40,6 +41,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,7 +53,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { toastError } from "@/lib/forms";
 import { qk, useAdAccounts, useConnections, usePlatforms, type PlatformCatalogItem } from "@/lib/queries";
@@ -102,7 +104,7 @@ function OAuthResultNotice() {
 
 function HowConnectingWorks() {
   const steps = [
-    ["Click Connect", "Pick a platform below. Nobody needs to copy API keys: it's a normal sign-in."],
+    ["Click Connect", "Pick a platform below. Most are a normal sign-in; Outbrain, The Trade Desk, Criteo, Apple Ads and Taboola ask for your own API keys."],
     ["Sign in and allow access", "Use the login that can see your ad accounts (e.g. your Business Manager or MCC admin)."],
     ["Choose a workspace", "Found ad accounts appear below. Assign each to a workspace and its data syncs automatically."],
   ];
@@ -128,12 +130,15 @@ function PlatformsSection() {
   const platforms = usePlatforms(org.id);
   const connections = useConnections(org.id);
   const [connecting, setConnecting] = useState<Platform | null>(null);
+  const [keysFor, setKeysFor] = useState<PlatformCatalogItem | null>(null);
   const [settingUp, setSettingUp] = useState<CredentialGroupId | null>(null);
   const [shopOpen, setShopOpen] = useState(false);
   const [shop, setShop] = useState("");
+  const [shopError, setShopError] = useState<string | null>(null);
   const isOwner = me.user.isSuperAdmin;
 
-  async function connect(p: Platform, extra?: { shop?: string }) {
+  /** Starts the OAuth sign-in; returns the error message when it can't. */
+  async function connect(p: Platform, extra?: { shop?: string }): Promise<string | null> {
     setConnecting(p);
     try {
       const { url } = await api<{ url: string }>(`/orgs/${org.id}/connections/${p.toLowerCase()}/authorize`, {
@@ -141,19 +146,38 @@ function PlatformsSection() {
         body: { workspaceId: workspace.id, ...extra },
       });
       window.location.assign(url);
+      return null;
     } catch (err) {
       toastError(err);
       setConnecting(null);
+      return err instanceof Error ? err.message : "Couldn't start the connection.";
     }
   }
 
-  function startConnect(p: Platform) {
-    if (p === "SHOPIFY") {
+  function startConnect(p: PlatformCatalogItem) {
+    if (p.connectsWithCredentials) {
+      setKeysFor(p);
+      return;
+    }
+    if (p.id === "SHOPIFY") {
       setShop("");
+      setShopError(null);
       setShopOpen(true);
       return;
     }
-    void connect(p);
+    void connect(p.id);
+  }
+
+  async function connectShop(e: React.FormEvent) {
+    e.preventDefault();
+    const domain = shopifyDomain(shop);
+    if (!domain) {
+      setShopError("Enter the store domain, like your-store.myshopify.com.");
+      return;
+    }
+    setShopError(null);
+    const error = await connect("SHOPIFY", { shop: domain });
+    if (error) setShopError(error);
   }
 
   const liveCount = (p: Platform) =>
@@ -174,7 +198,7 @@ function PlatformsSection() {
         <Link href={`/w/${workspace.id}/formats`} className="font-medium text-primary hover:underline">
           Ad formats
         </Link>{" "}
-        to see which ads it can run and the live results from this workspace.
+        to see each platform&apos;s ad types and start a campaign with its own form.
       </p>
       {platforms.isError ? (
         <Card><ErrorState message={platforms.error.message} onRetry={() => platforms.refetch()} /></Card>
@@ -190,8 +214,9 @@ function PlatformsSection() {
               platform={p}
               connected={liveCount(p.id)}
               canManage={can("integrations:manage")}
+              billingHref={org.locked ? `/w/${workspace.id}/settings/billing` : undefined}
               loading={connecting === p.id}
-              onConnect={() => startConnect(p.id)}
+              onConnect={() => startConnect(p)}
               onSetUp={isOwner ? () => setSettingUp(credentialGroupFor(p.id)?.id ?? null) : undefined}
               style={{ animationDelay: `${i * 35}ms` }}
             />
@@ -199,39 +224,69 @@ function PlatformsSection() {
         </div>
       )}
       {isOwner && <CredentialDialog groupId={settingUp} onClose={() => setSettingUp(null)} />}
+      <ConnectWithKeysDialog
+        key={keysFor?.id ?? "closed"}
+        platform={keysFor?.id ?? null}
+        onClose={() => setKeysFor(null)}
+        onUseOperatorKeys={
+          isOwner && keysFor?.operatorKeys
+            ? () => {
+                const p = keysFor.id;
+                setKeysFor(null);
+                void connect(p);
+              }
+            : undefined
+        }
+      />
       <Dialog open={shopOpen} onOpenChange={setShopOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Connect Shopify</DialogTitle>
             <DialogDescription>Enter the store you want to record campaigns for. You will then approve the app on Shopify.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="shopify-shop">Store domain</Label>
-            <Input id="shopify-shop" value={shop} placeholder="your-store.myshopify.com" onChange={(e) => setShop(e.target.value)} autoComplete="off" />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShopOpen(false)}>Cancel</Button>
-            <Button
-              disabled={!shop.trim() || connecting === "SHOPIFY"}
-              onClick={() => {
-                setShopOpen(false);
-                void connect("SHOPIFY", { shop: shop.trim() });
-              }}
-            >
-              {connecting === "SHOPIFY" ? <Loader2 className="animate-spin" /> : <Plug />}
-              Continue to Shopify
-            </Button>
-          </DialogFooter>
+          <form onSubmit={connectShop} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="shopify-shop">Store domain</Label>
+              <Input
+                id="shopify-shop"
+                value={shop}
+                placeholder="your-store.myshopify.com"
+                onChange={(e) => {
+                  setShop(e.target.value);
+                  setShopError(null);
+                }}
+                autoComplete="off"
+                aria-invalid={Boolean(shopError)}
+                aria-describedby={shopError ? "shopify-shop-error" : undefined}
+              />
+              {shopError && <p id="shopify-shop-error" className="text-sm text-destructive">{shopError}</p>}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShopOpen(false)}>Cancel</Button>
+              <Button type="submit" disabled={!shop.trim() || connecting === "SHOPIFY"}>
+                {connecting === "SHOPIFY" ? <Loader2 className="animate-spin" /> : <Plug />}
+                Continue to Shopify
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </section>
   );
 }
 
+/** Same rules as the API: "your-store", a URL, or your-store.myshopify.com; null when it isn't a store domain. */
+function shopifyDomain(raw: string) {
+  let shop = raw.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0] ?? "";
+  if (shop && !shop.includes(".")) shop = `${shop}.myshopify.com`;
+  return /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop) ? shop : null;
+}
+
 function PlatformCard({
   platform: p,
   connected,
   canManage,
+  billingHref,
   loading,
   onConnect,
   onSetUp,
@@ -240,6 +295,8 @@ function PlatformCard({
   platform: PlatformCatalogItem;
   connected: number;
   canManage: boolean;
+  /** Set when the organization is locked: connecting needs a plan first. */
+  billingHref?: string;
   loading: boolean;
   onConnect: () => void;
   /** Only for the platform owner: opens the API key setup. */
@@ -295,6 +352,27 @@ function PlatformCard({
               Connecting {p.name} isn&apos;t switched on yet. Ask your Ashniva administrator, or load sample data below to try the product.
             </TooltipContent>
           </Tooltip>
+        ) : billingHref ? (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="block">
+                  <Button size="sm" variant="outline" className="w-full" disabled>
+                    <Plug /> Connect
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-64">Your organization is read-only until a plan is active. Choose a plan to connect platforms.</TooltipContent>
+            </Tooltip>
+            <Button asChild size="sm" variant="ghost" className="w-full">
+              <Link href={billingHref}><CreditCard /> Choose a plan</Link>
+            </Button>
+            {onSetUp && (
+              <Button size="sm" variant="ghost" className="w-full" onClick={onSetUp}>
+                <KeyRound /> Change API keys
+              </Button>
+            )}
+          </>
         ) : (
           <>
             <Button size="sm" variant={connected ? "outline" : "default"} className="w-full" disabled={!canManage || loading} onClick={onConnect}>
@@ -310,6 +388,131 @@ function PlatformCard({
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Asks for the organization's own API keys on platforms without a sign-in. The
+ * server checks them with a harmless read before saving, so a wrong key fails here.
+ */
+function ConnectWithKeysDialog({
+  platform,
+  onClose,
+  onUseOperatorKeys,
+}: {
+  platform: Platform | null;
+  onClose: () => void;
+  /** Only for the platform operator, when the admin console has keys for this platform. */
+  onUseOperatorKeys?: () => void;
+}) {
+  const { org, workspace } = useWorkspace();
+  const queryClient = useQueryClient();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [busy, setBusy] = useState(false);
+  const spec = platform ? CONNECT_CREDENTIALS[platform] : undefined;
+  const name = platform ? PLATFORM_INFO[platform].name : "";
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!platform) return;
+    setBusy(true);
+    setError(null);
+    setFieldErrors({});
+    try {
+      const { accounts } = await api<{ accounts: number }>(`/orgs/${org.id}/connections/${platform.toLowerCase()}/credentials`, {
+        method: "POST",
+        body: { workspaceId: workspace.id, credentials: values },
+      });
+      toast.success(`${name} connected`, {
+        description: `${accounts} ad ${accounts === 1 ? "account" : "accounts"} found. Your data is syncing now.`,
+      });
+      await Promise.all(
+        ["platforms", "connections", "ad-accounts", "overview", "campaigns", "me", "workspace-ad-accounts"].map((k) =>
+          queryClient.invalidateQueries({ queryKey: [k] }),
+        ),
+      );
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't connect.");
+      if (err instanceof ApiError && err.details) setFieldErrors(err.details);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={Boolean(spec)} onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Connect {name}</DialogTitle>
+          <DialogDescription>
+            {spec?.help}{" "}
+            {spec && (
+              <a href={spec.docsUrl} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+                Where to find them
+              </a>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          {spec?.fields.map((f) => {
+            const id = `connect-${f.key}`;
+            const problem = fieldErrors[f.key]?.[0];
+            const common = {
+              id,
+              value: values[f.key] ?? "",
+              placeholder: f.placeholder,
+              autoComplete: "off",
+              spellCheck: false,
+              "aria-invalid": Boolean(problem),
+              "aria-describedby": problem || f.help ? `${id}-note` : undefined,
+            };
+            const set = (v: string) => setValues((prev) => ({ ...prev, [f.key]: v }));
+            return (
+              <div key={f.key} className="space-y-2">
+                <Label htmlFor={id}>{f.label}</Label>
+                {f.multiline ? (
+                  <Textarea {...common} rows={5} className="max-h-48 font-mono text-xs" onChange={(e) => set(e.target.value)} />
+                ) : (
+                  <Input {...common} type={f.secret ? "password" : "text"} onChange={(e) => set(e.target.value)} />
+                )}
+                {(problem || f.help) && (
+                  <p id={`${id}-note`} className={cn("text-xs", problem ? "text-destructive" : "text-muted-foreground")}>
+                    {problem ?? f.help}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <p className="text-xs text-muted-foreground">
+            Keys are stored encrypted and used only for your organization, so this connection sees only the accounts they can reach.
+          </p>
+          {error && (
+            <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter className="gap-2 sm:justify-between">
+            {onUseOperatorKeys ? (
+              <Button type="button" variant="ghost" disabled={busy} onClick={onUseOperatorKeys}>
+                <KeyRound /> Use the admin console keys
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
+              <Button type="submit" disabled={busy}>
+                {busy ? <Loader2 className="animate-spin" /> : <Plug />}
+                {busy ? "Checking keys…" : "Check and connect"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

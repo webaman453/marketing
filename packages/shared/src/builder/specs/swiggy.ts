@@ -29,7 +29,7 @@ export const swiggySpec: PlatformBuilderSpec = {
           infoField("swiggyNote", "Publish in the Swiggy portal", "Swiggy has no public ads API. This form matches Self Serve Ads, and the campaign has to be created there.", "warning"),
         ],
       },
-      { id: "budget", title: "Budget", fields: budgetFields({}) },
+      { id: "budget", title: "Budget", fields: budgetFields({ lifetime: false, help: "Daily budget for each of the days above." }) },
       launchSection(),
     ],
   },
@@ -53,4 +53,5 @@ export const swiggySpec: PlatformBuilderSpec = {
   maxAdGroups: 8,
   maxAds: 20,
   previews: () => ["google_display"],
+  apiCreatable: () => "Swiggy has no public ads API, so campaigns can't be published from here yet.",
 };

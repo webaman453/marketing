@@ -2,7 +2,7 @@
 
 import { PLATFORM_INFO } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, FlaskConical, Loader2, Plug, Users } from "lucide-react";
+import { ArrowRight, CreditCard, FlaskConical, Loader2, Plug, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { toastError } from "@/lib/forms";
+import { cn } from "@/lib/utils";
 
 /** Shown on the overview until the workspace has at least one ad account. */
 export function GetStarted() {
@@ -35,15 +36,31 @@ export function GetStarted() {
     }
   }
 
+  const billing = `/w/${workspace.id}/settings/billing`;
   const steps = [
+    {
+      icon: CreditCard,
+      title: "Choose a plan",
+      body: can("billing:manage")
+        ? "Your organization is read-only until a plan is active. Pick one to connect platforms and create campaigns."
+        : "Your organization is read-only until a plan is active. Ask the owner to choose one.",
+      action: (
+        <Button asChild size="sm">
+          <Link href={billing}>
+            {can("billing:manage") ? "Choose a plan" : "View plans"} <ArrowRight />
+          </Link>
+        </Button>
+      ),
+      show: org.locked,
+    },
     {
       icon: Plug,
       title: "Connect an ad platform",
       body: "Sign in with Meta or Google Ads and choose the accounts to bring into this workspace.",
       action: (
-        <Button asChild size="sm">
+        <Button asChild size="sm" variant={org.locked ? "outline" : "default"}>
           <Link href={`/w/${workspace.id}/integrations`}>
-            Connect platform <ArrowRight />
+            {org.locked ? "See platforms" : "Connect platform"} <ArrowRight />
           </Link>
         </Button>
       ),
@@ -96,7 +113,7 @@ export function GetStarted() {
       </Card>
 
       {steps.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className={cn("grid gap-4", steps.length > 3 ? "md:grid-cols-2 xl:grid-cols-4" : "md:grid-cols-3")}>
           {steps.map((s, i) => (
             <Card key={s.title} className="gap-3 p-5 animate-fade-up" style={{ animationDelay: `${(i + 1) * 60}ms` }}>
               <div className="flex items-center gap-3">

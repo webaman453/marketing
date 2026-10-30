@@ -2,16 +2,20 @@
  * Super admin (platform operator) endpoints. Mounted at /api/admin behind
  * requireAuth + requireSuperAdmin.
  */
-import { adjustAiTokens, audit, hashPassword, isOrgLocked } from "@ashniva/core";
+import { adjustAiTokens, audit, isOrgLocked, randomToken, sha256 } from "@ashniva/core";
 import { prisma, type Prisma } from "@ashniva/db";
-import { PLANS, type PlanId } from "@ashniva/shared";
+import { BRAND, PLANS, PRICING, type PlanId } from "@ashniva/shared";
 import { Router } from "express";
 import { z } from "zod";
-import { conflict, notFound, parse } from "../lib/errors";
+import { config } from "../config";
+import { badRequest, conflict, notFound, parse } from "../lib/errors";
+import { esc, sendMail } from "../lib/mailer";
 import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
 import { adminSettingsRouter } from "./admin-settings.routes";
 
 export const adminRouter = Router();
+
+const SET_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000;
 
 adminRouter.use("/settings", adminSettingsRouter);
 
@@ -27,7 +31,8 @@ adminRouter.get("/stats", async (_req, res) => {
     prisma.platformConnection.count({ where: { mode: "LIVE", status: { not: "REVOKED" } } }),
     prisma.platformConnection.count({ where: { mode: "LIVE", OR: [{ status: { in: ["EXPIRED", "ERROR"] } }, { syncStatus: "FAILED" }] } }),
     prisma.organization.groupBy({ by: ["plan"], _count: { _all: true } }),
-    prisma.organization.groupBy({ by: ["plan"], where: { subscriptionStatus: "ACTIVE" }, _count: { _all: true } }),
+    // Only orgs actually billed through Razorpay; complimentary (free) orgs are ACTIVE too but pay nothing.
+    prisma.organization.groupBy({ by: ["plan"], where: { subscriptionStatus: "ACTIVE", billingSubscriptionId: { not: null } }, _count: { _all: true } }),
     prisma.syncRun.count({ where: { startedAt: { gte: new Date(Date.now() - 86_400_000) } } }),
     prisma.syncRun.count({ where: { startedAt: { gte: new Date(Date.now() - 86_400_000) }, status: "FAILED" } }),
     prisma.aiTokenLedger.aggregate({ where: { type: "USAGE", createdAt: { gte: monthStart } }, _sum: { tokens: true } }),
@@ -89,26 +94,46 @@ const updateOrg = z.object({
 
 const createAccount = z.object({
   name: z.string().trim().min(2).max(80),
-  email: z.email().trim().toLowerCase(),
-  password: z.string().min(8).max(128).regex(/[A-Za-z]/, "Password must contain a letter").regex(/[0-9]/, "Password must contain a number"),
+  // Trim before validating: z.email().trim() checks the format first, so a pasted " a@b.c " was rejected.
+  email: z.string().trim().toLowerCase().pipe(z.email()),
   companyName: z.string().trim().min(2).max(80),
   access: z.enum(["free", "paid"]),
 });
 
-/** Admin-created customer. Free is complimentary access; paid stays locked until they subscribe. */
+/**
+ * Admin-created customer. Free is complimentary access; paid stays locked until they subscribe.
+ * The user has no password: they choose one from an emailed link, which also verifies the address.
+ */
 adminRouter.post("/accounts", async (req, res) => {
   const input = parse(createAccount, req.body);
   if (await prisma.user.findUnique({ where: { email: input.email } })) {
     throw conflict("An account with this email already exists.");
   }
   const slug = await newOrgSlug(input.companyName);
-  const passwordHash = await hashPassword(input.password);
-  const user = await prisma.$transaction(async (tx) => {
-    const created = await tx.user.create({
-      data: { name: input.name, email: input.email, passwordHash, emailVerifiedAt: new Date() },
+  const token = randomToken();
+  const { user, org } = await prisma.$transaction(async (tx) => {
+    const created = await tx.user.create({ data: { name: input.name, email: input.email } });
+    const owned = await createOwnedOrg(tx, created.id, input.companyName, slug, input.access === "free" ? "complimentary" : "unpaid");
+    await tx.passwordResetToken.create({
+      data: { userId: created.id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + SET_PASSWORD_TTL_MS) },
     });
-    await createOwnedOrg(tx, created.id, input.companyName, slug, input.access === "free" ? "complimentary" : "unpaid");
-    return created;
+    return { user: created, org: owned };
+  });
+  await sendMail({
+    to: user.email,
+    subject: `Your ${BRAND.name} account is ready`,
+    heading: "Set your password",
+    body: `Hi ${esc(user.name)}, an account for <strong>${esc(org.name)}</strong> has been created for you on ${BRAND.name}. Choose a password to sign in. This link expires in 24 hours; after that, use "Forgot password" on the sign-in page.`,
+    cta: { label: "Set password", url: `${config().WEB_URL}/set-password?token=${token}` },
+  });
+  await audit({
+    orgId: org.id,
+    userId: req.userId,
+    action: "admin.account_created",
+    entityType: "organization",
+    entityId: org.id,
+    entityName: org.name,
+    changes: { access: { from: null, to: input.access }, owner: { from: null, to: user.email }, setPasswordLink: { from: null, to: "emailed (24h)" } },
   });
   res.status(201).json({ id: user.id, email: user.email, access: input.access });
 });
@@ -117,13 +142,25 @@ adminRouter.patch("/orgs/:orgId", async (req, res) => {
   const input = parse(updateOrg, req.body);
   const org = await prisma.organization.findUnique({ where: { id: req.params.orgId as string } });
   if (!org) throw notFound("Organization");
+  // Razorpay owns the plan of a paying customer: a manual change would keep charging the old plan
+  // and the next webhook would undo it. Cancel their subscription first.
+  const billed = Boolean(org.billingSubscriptionId) && (org.subscriptionStatus === "ACTIVE" || org.subscriptionStatus === "PAST_DUE");
+  if (billed && (input.plan || input.subscriptionStatus)) {
+    throw badRequest(`${org.name} pays through Razorpay. Cancel their subscription before changing the plan or status by hand.`);
+  }
   const base = org.trialEndsAt && org.trialEndsAt > new Date() ? org.trialEndsAt : new Date();
+  // A trial without an end date counts as locked, so moving to TRIAL always sets one.
+  const trialDays = input.extendTrialDays ?? (input.plan === "TRIAL" && !(org.trialEndsAt && org.trialEndsAt > new Date()) ? Math.max(1, PRICING.trialDays) : undefined);
   const updated = await prisma.organization.update({
     where: { id: org.id },
     data: {
       ...(input.plan ? { plan: input.plan } : {}),
       ...(input.subscriptionStatus ? { subscriptionStatus: input.subscriptionStatus } : {}),
-      ...(input.extendTrialDays ? { trialEndsAt: new Date(base.getTime() + input.extendTrialDays * 86_400_000) } : {}),
+      // A hand-set plan replaces the (cancelled, expired or never paid) Razorpay subscription: detach it so its
+      // later webhooks, such as the end-of-cycle cancellation, don't overwrite what the operator chose.
+      ...((input.plan || input.subscriptionStatus) && org.billingSubscriptionId ? { billingSubscriptionId: null, billingProvider: null } : {}),
+      ...(trialDays ? { trialEndsAt: new Date(base.getTime() + trialDays * 86_400_000) } : {}),
+      ...(input.plan === "TRIAL" && !input.subscriptionStatus ? { subscriptionStatus: "TRIALING" as const } : {}),
       // A manually assigned paid plan without a provider is treated as an active invoice-billed plan.
       ...(input.plan && input.plan !== "TRIAL" && !input.subscriptionStatus ? { subscriptionStatus: "ACTIVE" as const } : {}),
     },
@@ -136,8 +173,9 @@ adminRouter.patch("/orgs/:orgId", async (req, res) => {
     entityId: org.id,
     entityName: org.name,
     changes: {
-      ...(input.plan ? { plan: { from: org.plan, to: updated.plan } } : {}),
-      ...(input.extendTrialDays ? { trialEndsAt: { from: org.trialEndsAt, to: updated.trialEndsAt } } : {}),
+      ...(org.plan !== updated.plan ? { plan: { from: org.plan, to: updated.plan } } : {}),
+      ...(org.subscriptionStatus !== updated.subscriptionStatus ? { subscriptionStatus: { from: org.subscriptionStatus, to: updated.subscriptionStatus } } : {}),
+      ...(String(org.trialEndsAt) !== String(updated.trialEndsAt) ? { trialEndsAt: { from: org.trialEndsAt, to: updated.trialEndsAt } } : {}),
     },
   });
   res.json({ id: updated.id, plan: updated.plan, subscriptionStatus: updated.subscriptionStatus, trialEndsAt: updated.trialEndsAt });

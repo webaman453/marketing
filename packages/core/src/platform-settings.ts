@@ -77,14 +77,21 @@ async function load() {
 /** The shipped price list, with AI_FREE_TOKENS from .env when it's set. */
 export function envDefaultCatalog(): Catalog {
   const base = defaultCatalog();
-  const n = Number(process.env.AI_FREE_TOKENS ?? Number.NaN);
+  // A blank `AI_FREE_TOKENS=` line means "not set" (Number("") would be 0 free tokens).
+  const raw = process.env.AI_FREE_TOKENS?.trim();
+  const n = raw ? Number(raw) : Number.NaN;
   return Number.isFinite(n) && n >= 0 ? { ...base, aiFreeTokens: Math.floor(n) } : base;
 }
 
 /** Loads owner settings, at most every 15 seconds unless forced. Safe to call on every request. */
 export async function loadPlatformSettings(force = false): Promise<void> {
   if (!force && Date.now() - loadedAt < RELOAD_MS) return;
-  if (inflight) return inflight;
+  if (inflight) {
+    // A forced load (right after a save) must not reuse a read that started before the save.
+    await inflight;
+    if (!force) return;
+    return loadPlatformSettings(true);
+  }
   inflight = load().finally(() => {
     inflight = null;
   });
@@ -169,4 +176,8 @@ export async function setInternalSetting(key: string, value: Prisma.InputJsonVal
     create: { key: `internal:${key}`, value },
     update: { value },
   });
+}
+
+export async function deleteInternalSetting(key: string) {
+  await prisma.platformSetting.deleteMany({ where: { key: `internal:${key}` } });
 }

@@ -100,6 +100,8 @@ export default function BillingPage() {
   if (!billing.data) return <Skeleton className="h-96 rounded-xl" />;
   const b = billing.data;
   const trial = b.plan === "TRIAL";
+  // Sign-ups without a trial start on TRIAL with no end date: they have no plan yet.
+  const unpaid = trial && !b.trialEndsAt;
   const daysLeft = trial && b.trialEndsAt ? Math.max(0, differenceInCalendarDays(parseISO(b.trialEndsAt), new Date())) : 0;
   // An extended trial can run longer than the standard length.
   const trialTotal = Math.max(1, PRICING.trialDays, daysLeft);
@@ -116,23 +118,23 @@ export default function BillingPage() {
       <Card className="gap-5">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            {PLANS[b.plan].name}
-            <Badge variant={b.subscriptionStatus === "ACTIVE" || b.subscriptionStatus === "TRIALING" ? "secondary" : "destructive"}>
-              {trial && !b.trialEndsAt ? "No plan" : (STATUS_LABEL[b.subscriptionStatus] ?? b.subscriptionStatus)}
+            {unpaid ? "No plan" : PLANS[b.plan].name}
+            <Badge variant={!unpaid && (b.subscriptionStatus === "ACTIVE" || b.subscriptionStatus === "TRIALING") ? "secondary" : "destructive"}>
+              {unpaid ? "Locked" : (STATUS_LABEL[b.subscriptionStatus] ?? b.subscriptionStatus)}
             </Badge>
           </CardTitle>
           <CardDescription>
             {trial
               ? b.trialEndsAt
                 ? `Free trial ${daysLeft > 0 ? `ends ${longDate(b.trialEndsAt.slice(0, 10))}` : "has ended"} · all features included`
-                : "No plan yet. Choose one below to start using this workspace."
+                : `Choose a plan below to start using ${BRAND.name}.`
               : b.currentPeriodEnd
                 ? `${b.subscriptionStatus === "CANCELLED" ? "Access until" : "Renews on"} ${longDate(b.currentPeriodEnd.slice(0, 10))} · ${money(PLANS[b.plan].priceMonthly, "INR")}/month`
                 : `${money(PLANS[b.plan].priceMonthly, "INR")}/month`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          {trial && (
+          {trial && b.trialEndsAt && (
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="font-medium">{daysLeft} of {trialTotal} days left</span>

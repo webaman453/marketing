@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FxInfo } from "./format";
 import { PLATFORMS } from "./platforms";
 
 export const REPORT_METRICS = [
@@ -91,6 +92,8 @@ export interface ReportResult {
   branding: { name: string; color: string; logoUrl: string | null; footer: string | null };
   workspaceName: string;
   generatedAt: string;
+  /** How money was converted into `currency`. */
+  fx?: FxInfo;
 }
 
 /** Resolves a preset relative to `today` (YYYY-MM-DD). */

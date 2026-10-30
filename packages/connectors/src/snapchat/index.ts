@@ -7,7 +7,8 @@
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { ConnectorError } from "../errors";
-import { codeFromStatus, requestJson, type RequestOptions } from "../http";
+import { allPages, codeFromStatus, requestJson, type RequestOptions } from "../http";
+import { builderZone, zoneOffsetMs, zonedTimeToUtc } from "../builder-values";
 import type {
   AccountRef,
   AccountStructure,
@@ -31,6 +32,15 @@ const MICRO = 1_000_000;
 
 type Row = Record<string, any>;
 
+/** An instant as ISO 8601 with the zone's offset, e.g. 2026-10-01T00:00:00.000-07:00. */
+function localIso(d: Date, timeZone: string) {
+  const offset = zoneOffsetMs(d.getTime(), timeZone);
+  const wall = new Date(d.getTime() + offset).toISOString().slice(0, 23);
+  const mins = Math.round(Math.abs(offset) / 60_000);
+  const sign = offset < 0 ? "-" : "+";
+  return `${wall}${sign}${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+}
+
 export const mapSnapStatus = (s: string | undefined): EntityStatus => (s === "ACTIVE" ? "ACTIVE" : s === "DELETED" ? "REMOVED" : "PAUSED");
 
 export class SnapchatConnector implements AdPlatformConnector {
@@ -52,16 +62,17 @@ export class SnapchatConnector implements AdPlatformConnector {
     return requestJson<T>(url, { ...opts, headers: { Authorization: `Bearer ${auth.accessToken}`, ...opts.headers } }, this.mapError);
   }
 
-  /** Follows `paging.next_link`, collecting `key[].<entity>` objects. */
-  private async all(path: string, auth: ConnectorAuth, key: string, entity: string) {
-    const out: Row[] = [];
-    let next: string | undefined = path;
-    while (next) {
-      const res: Row = await this.call<Row>(next, auth, next === path ? { query: { limit: 1000 } } : {});
-      for (const item of res[key] ?? []) if (item[entity]) out.push(item[entity]);
-      next = res.paging?.next_link;
-    }
-    return out;
+  /** Follows `paging.next_link` (capped at MAX_PAGES like every list), collecting `key[].<entity>` objects. */
+  private all(path: string, auth: ConnectorAuth, key: string, entity: string) {
+    return allPages<Row, string>(
+      path,
+      async (next) => {
+        const res: Row = await this.call<Row>(next, auth, next === path ? { query: { limit: 1000 } } : {});
+        const items = ((res[key] ?? []) as Row[]).map((item) => item[entity]).filter(Boolean) as Row[];
+        return { items, next: res.paging?.next_link as string | undefined };
+      },
+      `Snapchat ${key} list`,
+    );
   }
 
   getAuthUrl({ state, redirectUri }: { state: string; redirectUri: string }) {
@@ -173,14 +184,22 @@ export class SnapchatConnector implements AdPlatformConnector {
       ["AD_GROUP", "adsquad"],
       ["AD", "ad"],
     ];
+    // DAY stats must start and end at midnight in the ad account's timezone (measurement doc):
+    // from local midnight of the first day to local midnight after the last one.
+    const zone = builderZone(account);
+    const [fy, fm, fd] = range.from.split("-").map(Number) as [number, number, number];
+    const [ty, tm, td] = range.to.split("-").map(Number) as [number, number, number];
+    const after = new Date(Date.UTC(ty, tm - 1, td + 1));
+    const startTime = localIso(zonedTimeToUtc(fy, fm, fd, 0, 0, 0, zone), zone);
+    const endTime = localIso(zonedTimeToUtc(after.getUTCFullYear(), after.getUTCMonth() + 1, after.getUTCDate(), 0, 0, 0, zone), zone);
     const out: ExternalMetricRow[] = [];
     for (const [level, breakdown] of levels) {
       const res = await this.call<Row>(`/adaccounts/${account.externalId}/stats`, auth, {
         query: {
           breakdown,
           granularity: "DAY",
-          start_time: `${range.from}T00:00:00.000Z`,
-          end_time: `${range.to}T23:59:59.999Z`,
+          start_time: startTime,
+          end_time: endTime,
           fields: "impressions,swipes,spend,conversion_purchases,conversion_purchases_value,video_views",
         },
       });

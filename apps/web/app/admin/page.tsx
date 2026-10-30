@@ -366,7 +366,8 @@ function AdminConsole() {
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             <Badge variant="secondary">
-                              {PLANS[o.plan]?.name ?? o.plan}
+                              {/* A trial with no end date was never granted: the org hasn't bought a plan. */}
+                              {o.plan === "TRIAL" && !o.trialEndsAt ? "No plan" : (PLANS[o.plan]?.name ?? o.plan)}
                             </Badge>
                             {o.locked && (
                               <Badge variant="destructive">Locked</Badge>
@@ -519,7 +520,6 @@ function CreateAccountDialog({ open, onClose }: { open: boolean; onClose: () => 
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [access, setAccess] = useState<"free" | "paid">("paid");
   const [busy, setBusy] = useState(false);
@@ -529,16 +529,15 @@ function CreateAccountDialog({ open, onClose }: { open: boolean; onClose: () => 
     try {
       await api("/admin/accounts", {
         method: "POST",
-        body: { name, email, password, companyName, access },
+        body: { name, email, companyName, access },
       });
       toast.success(access === "free" ? "Free account created" : "Account created", {
-        description: access === "free" ? `${email} can use the product without a plan.` : `${email} must choose a plan before making changes.`,
+        description: `We emailed ${email} a link to set their password (valid for 24 hours).`,
       });
       await queryClient.invalidateQueries({ queryKey: ["admin-orgs"] });
       await queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
       setName("");
       setEmail("");
-      setPassword("");
       setCompanyName("");
       setAccess("paid");
       onClose();
@@ -554,7 +553,9 @@ function CreateAccountDialog({ open, onClose }: { open: boolean; onClose: () => 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Create account</DialogTitle>
-          <DialogDescription>You decide whether this organization is free or has to buy a plan.</DialogDescription>
+          <DialogDescription>
+            We email them a link to choose their own password. You decide whether this organization is free or has to buy a plan.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <FormField id="acct-name" label="Full name">
@@ -563,11 +564,8 @@ function CreateAccountDialog({ open, onClose }: { open: boolean; onClose: () => 
           <FormField id="acct-company" label="Organization">
             <Input id="acct-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
           </FormField>
-          <FormField id="acct-email" label="Email">
+          <FormField id="acct-email" label="Email" hint="The set-password link goes here and expires in 24 hours. After that they can use Forgot password.">
             <Input id="acct-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </FormField>
-          <FormField id="acct-password" label="Password" hint="At least 8 characters, with a letter and a number. Share this with them.">
-            <Input id="acct-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </FormField>
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant={access === "paid" ? "default" : "outline"} onClick={() => setAccess("paid")}>
@@ -584,7 +582,7 @@ function CreateAccountDialog({ open, onClose }: { open: boolean; onClose: () => 
           </p>
         </div>
         <DialogFooter>
-          <Button onClick={() => void submit()} disabled={busy || name.trim().length < 2 || companyName.trim().length < 2 || !email.includes("@") || password.length < 8}>
+          <Button onClick={() => void submit()} disabled={busy || name.trim().length < 2 || companyName.trim().length < 2 || !email.includes("@")}>
             {busy && <Loader2 className="animate-spin" />}
             Create
           </Button>
@@ -700,7 +698,7 @@ function ImportantLinks({
   const pages: { label: string; hint: string; href: string }[] = [
     { label: "Platform admin", hint: "This page. Organizations are the table below.", href: `${origin}/admin` },
     { label: "Sign in", hint: "Where a company logs in after an account exists.", href: `${origin}/login` },
-    { label: "Create account", hint: "A new company registers here and appears in Organizations.", href: `${origin}/signup` },
+    { label: "Public sign-up page", hint: "Companies register themselves here and stay read-only until they choose a plan. To set one up yourself, use Create account above.", href: `${origin}/signup` },
   ];
   const redirects = CREDENTIAL_GROUPS.flatMap((group) => {
     const href = group.platform ? redirectUrls?.[group.platform] : undefined;
@@ -715,7 +713,7 @@ function ImportantLinks({
     <Card className="gap-0 overflow-hidden py-0">
       <CardHeader className="border-b py-4">
         <CardTitle>Important links</CardTitle>
-        <CardDescription>Open these from the sidebar item Platform admin. Copy a link when a platform asks for a redirect URL.</CardDescription>
+        <CardDescription>Links to share or paste elsewhere. Copy a redirect URL when a platform asks for one.</CardDescription>
       </CardHeader>
       <ul className="divide-y">
         {rows.map((row) => (
@@ -730,9 +728,13 @@ function ImportantLinks({
               variant="outline"
               size="sm"
               disabled={!row.href}
-              onClick={() => {
-                void navigator.clipboard.writeText(row.href);
-                toast.success("Copied", { description: row.label });
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(row.href);
+                  toast.success("Copied", { description: row.label });
+                } catch {
+                  toast.error("Couldn't copy the link", { description: "Select the link and copy it by hand." });
+                }
               }}
             >
               <Copy /> Copy

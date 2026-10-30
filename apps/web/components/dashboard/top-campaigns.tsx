@@ -43,6 +43,13 @@ export function TopCampaigns({
             </TableRow>
           </TableHeader>
           <TableBody>
+            {campaigns.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                  No campaign spend in this period.
+                </TableCell>
+              </TableRow>
+            )}
             {campaigns.map((c) => (
               <TableRow key={c.id} className="group">
                 <TableCell className="w-[42%] max-w-0 pl-4">

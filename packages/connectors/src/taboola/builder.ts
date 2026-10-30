@@ -1,5 +1,5 @@
 import type { BuilderDraft } from "@ashniva/shared";
-import { budgetOf, countryCodes, isoDate, dateOf, mediaOf, str } from "../builder-values";
+import { budgetOf, countryCodes, dayOf, mediaOf, str } from "../builder-values";
 import { ConnectorError } from "../errors";
 import { accountTree } from "../tree";
 import type { AccountStructure, BuilderAsset, EntityStatus } from "../types";
@@ -30,11 +30,12 @@ export async function taboolaCreateCampaign(api: TaboolaApi, accountId: string, 
     is_active: status === "ACTIVE",
     daily_cap: budget && !budget.lifetime ? budget.amount : undefined,
     spending_limit: budget?.lifetime ? budget.amount : undefined,
-    spending_limit_model: budget?.lifetime ? "MONTHLY" : "NONE",
+    // A lifetime budget caps the whole flight ("ENTIRE"); "MONTHLY" would reset it every month.
+    spending_limit_model: budget?.lifetime ? "ENTIRE" : "NONE",
     country_targeting: countries.length ? { type: "INCLUDE", value: countries } : undefined,
     platform_targeting: strsDevices(c),
-    start_date: isoDate(dateOf(c, "startDate")) ?? undefined,
-    end_date: isoDate(dateOf(c, "endDate")) ?? undefined,
+    start_date: dayOf(c, "startDate") ?? undefined,
+    end_date: dayOf(c, "endDate") ?? undefined,
   });
   const campaignId = String(created.id);
   const groups = [];
@@ -56,7 +57,7 @@ export async function taboolaCreateCampaign(api: TaboolaApi, accountId: string, 
       }
     }
     return accountTree({
-      campaign: { id: campaignId, name: str(c, "name"), status, objective: String(draft.setup.objective), daily: budget && !budget.lifetime ? budget.amount : null, lifetime: budget?.lifetime ? budget.amount : null, start: isoDate(dateOf(c, "startDate")), end: isoDate(dateOf(c, "endDate")) },
+      campaign: { id: campaignId, name: str(c, "name"), status, objective: String(draft.setup.objective), daily: budget && !budget.lifetime ? budget.amount : null, lifetime: budget?.lifetime ? budget.amount : null, start: dayOf(c, "startDate"), end: dayOf(c, "endDate") },
       groups,
       ads,
     });

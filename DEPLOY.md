@@ -49,7 +49,7 @@ Works on any Linux VPS with 2 vCPU / 4 GB RAM or more (DigitalOcean, AWS Lightsa
      Caddy gets a certificate for `DOMAIN` automatically.
 
    The first build takes a few minutes.
-6. **Create your admin account:** open `https://<domain>/signup` and sign up with the email you put in `SUPER_ADMIN_EMAILS`. You then have **Admin** in the sidebar.
+6. **Create your admin account:** open `https://<domain>/signup` and sign up with the email you put in `SUPER_ADMIN_EMAILS`, then click the verification link we email you. Admin rights (and free access for your own organization) only apply once that address is verified, so nobody else can claim them by signing up first. If email isn't set up yet, the link is in the API log (`docker compose logs api | grep verify-email`). You then have **Admin** in the sidebar.
 7. **Add keys and prices in the app:** Admin → *API keys & integrations* (Meta, Google, …, AI, Razorpay, Resend) and Admin → *Plans & pricing*. Each card shows the redirect URL to register with that platform.
 
 Updating to a new version:
@@ -79,6 +79,7 @@ Data lives in Docker volumes: `pgdata` (database), `uploads` (creatives and logo
 - **Web:** Vercel (root directory `apps/web`) or the same Railway/Render project with `pnpm --filter @ashniva/web start`. Set `API_URL` to the API's internal or public URL **before building**; the `/api/*` proxy is fixed at build time.
 - Set the same `.env` values on every service. `WEB_URL` is the public web address.
 - File uploads: set the `S3_*` variables (AWS S3 or Cloudflare R2), because these hosts don't keep local files between deploys.
+- Ship the whole repo (not just `dist/`): report PDFs load their fonts from `packages/core/assets/fonts`. Set `REPO_ROOT` to the repo's path on the host if the services run without a `.env` file (the Docker image sets `REPO_ROOT=/app`).
 
 ## Option C: a plain VPS without Docker
 

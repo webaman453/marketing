@@ -10,12 +10,15 @@ import type {
   ConnectionDTO,
   EntityStatus,
   InvitationDTO,
+  LeadDTO,
+  LeadQuery,
   LeadsResponse,
   MeResponse,
   MemberDTO,
   OverviewResponse,
   Platform,
   PlatformInfo,
+  UpdateLeadInput,
 } from "@ashniva/shared";
 import type {
   AiInsightsResponse,
@@ -30,9 +33,11 @@ import type {
   ReportResult,
   RuleDTO,
   RuleRunDTO,
+  SpendBudgetInput,
+  SpendOverviewDTO,
   UsageDTO,
 } from "@ashniva/shared";
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "./api";
 import { useDateRange } from "./date-range";
 
@@ -95,22 +100,50 @@ export function useCampaign(workspaceId: string, campaignId: string) {
   });
 }
 
-export interface LeadFilters {
-  platform?: Platform;
-  source?: string;
-  campaignId?: string;
-  search?: string;
+export interface LeadFilters extends Omit<LeadQuery, "page" | "pageSize"> {
   page: number;
+  /** Rows per page; 1 when only the summary counts are needed. */
+  pageSize?: number;
 }
 
-export function useLeads(workspaceId: string, filters: LeadFilters) {
+export function useLeads(workspaceId: string, filters: LeadFilters, options?: { enabled?: boolean }) {
   const { from, to, ready } = useDateRange();
   const params = { from, to, ...filters };
   return useQuery({
     queryKey: ["leads", workspaceId, params],
     queryFn: () => api<LeadsResponse>(`/workspaces/${workspaceId}/leads`, { query: { ...params } }),
-    enabled: ready,
+    enabled: ready && (options?.enabled ?? true),
     placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Sets a lead's status and/or note. The lead changes in every cached list right away;
+ * on failure the lists are put back. Counts and filtered lists refresh afterwards.
+ */
+export function useUpdateLead(workspaceId: string) {
+  const queryClient = useQueryClient();
+  type Snapshot = [QueryKey, LeadsResponse | undefined][];
+  const patchLists = (id: string, patch: Partial<LeadDTO>) => {
+    const snapshot: Snapshot = queryClient.getQueriesData<LeadsResponse>({ queryKey: ["leads", workspaceId] });
+    for (const [key, data] of snapshot) {
+      if (!data) continue;
+      queryClient.setQueryData<LeadsResponse>(key, { ...data, leads: data.leads.map((l) => (l.id === id ? { ...l, ...patch } : l)) });
+    }
+    return snapshot;
+  };
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & UpdateLeadInput) =>
+      api<LeadDTO>(`/workspaces/${workspaceId}/leads/${id}`, { method: "PATCH", body }),
+    onMutate: async ({ id, ...body }) => {
+      await queryClient.cancelQueries({ queryKey: ["leads", workspaceId] });
+      return patchLists(id, body.note === undefined ? { status: body.status } : { ...body, note: body.note?.trim() || null });
+    },
+    onError: (_err, _vars, snapshot) => snapshot?.forEach(([key, data]) => queryClient.setQueryData(key, data)),
+    // Only the workflow fields: the list keeps its own cost estimate.
+    onSuccess: (saved) =>
+      void patchLists(saved.id, { status: saved.status, note: saved.note, statusUpdatedAt: saved.statusUpdatedAt, statusUpdatedBy: saved.statusUpdatedBy }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["leads", workspaceId] }),
   });
 }
 
@@ -127,10 +160,17 @@ export const useWorkspaceAdAccounts = (workspaceId: string) =>
   useQuery({
     queryKey: qk.workspaceAdAccounts(workspaceId),
     queryFn: () =>
-      api<{ id: string; name: string; externalId: string; platform: Platform; currency: string; sample: boolean; connected: boolean }[]>(`/workspaces/${workspaceId}/ad-accounts`),
+      api<{ id: string; name: string; externalId: string; platform: Platform; currency: string; timezone: string | null; sample: boolean; connected: boolean }[]>(`/workspaces/${workspaceId}/ad-accounts`),
   });
 
-export type PlatformCatalogItem = PlatformInfo & { supported: boolean; configured: boolean };
+export type PlatformCatalogItem = PlatformInfo & {
+  supported: boolean;
+  configured: boolean;
+  /** Connect asks for the organization's own API keys instead of a sign-in. */
+  connectsWithCredentials?: boolean;
+  /** The operator's own keys are set too (only the platform operator may connect with them). */
+  operatorKeys?: boolean;
+};
 
 export const usePlatforms = (orgId: string) =>
   useQuery({
@@ -238,10 +278,12 @@ export const useRule = (ws: string, id: string) =>
 export const useRuleRuns = (ws: string, id: string) =>
   useQuery({ queryKey: qk2.ruleRuns(ws, id), queryFn: () => api<RuleRunDTO[]>(`/workspaces/${ws}/rules/${id}/runs`) });
 
-export const useNotifications = () =>
+/** The signed-in user's notifications in one organization (all of them when orgId is omitted). */
+export const useNotifications = (orgId?: string) =>
   useQuery({
-    queryKey: qk2.notifications,
-    queryFn: () => api<{ unread: number; items: NotificationDTO[] }>("/notifications"),
+    // Prefixed by qk2.notifications, so invalidating that refreshes every org's list.
+    queryKey: [...qk2.notifications, orgId ?? "all"],
+    queryFn: () => api<{ unread: number; items: NotificationDTO[] }>("/notifications", { query: orgId ? { orgId } : undefined }),
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
   });
@@ -275,3 +317,38 @@ export const useAiWallet = (org: string) =>
   useQuery({ queryKey: qk2.aiWallet(org), queryFn: () => api<AiWalletDTO>(`/orgs/${org}/ai/wallet`) });
 
 export type { AiInsightsResponse };
+
+// ───────── Spend & billing ─────────
+
+export const spendKey = (ws: string) => ["spend", ws] as const;
+
+export const useSpend = (workspaceId: string) =>
+  useQuery({ queryKey: spendKey(workspaceId), queryFn: () => api<SpendOverviewDTO>(`/workspaces/${workspaceId}/spend`) });
+
+/** Monthly budget of one ad account; `monthlyLimit: null` removes it. */
+export function useSetSpendBudget(workspaceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ accountId, ...body }: SpendBudgetInput & { accountId: string }) =>
+      api(`/workspaces/${workspaceId}/ad-accounts/${accountId}/spend-budget`, { method: "PUT", body }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: spendKey(workspaceId) }),
+  });
+}
+
+export function useRefreshBilling(workspaceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (accountId: string) => api(`/workspaces/${workspaceId}/ad-accounts/${accountId}/billing/refresh`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: spendKey(workspaceId) }),
+  });
+}
+
+/** The platform's own account spending limit (Meta spend cap, Google account budget); null removes it. */
+export function useSetSpendLimit(workspaceId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ accountId, amount }: { accountId: string; amount: number | null }) =>
+      api(`/workspaces/${workspaceId}/ad-accounts/${accountId}/spend-limit`, { method: "PUT", body: { amount } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: spendKey(workspaceId) }),
+  });
+}

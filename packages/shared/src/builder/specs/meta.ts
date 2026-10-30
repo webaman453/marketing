@@ -323,7 +323,15 @@ export const metaSpec: PlatformBuilderSpec = {
         id: "performance",
         title: "Performance goal",
         fields: [
-          { key: "optimizationGoal", type: "radio", label: "Performance goal", options: metaGoals, default: (ctx) => metaGoals(ctx)[0]!.value },
+          {
+            key: "optimizationGoal",
+            type: "radio",
+            label: "Performance goal",
+            options: metaGoals,
+            // On a new ad set the conversion location isn't in ctx yet: use the default it is about to get.
+            default: (ctx) =>
+              metaGoals({ ...ctx, adGroup: { ...ctx.adGroup, conversionLocation: ctx.adGroup.conversionLocation ?? metaLocations(ctx)[0]?.value ?? "" } })[0]!.value,
+          },
           { key: "pixelId", type: "accountOption", source: "pixels", label: "Dataset (pixel)", required: true, showIf: pixelNeeded, autoSelect: true },
           {
             key: "conversionEvent",

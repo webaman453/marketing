@@ -23,7 +23,7 @@ import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
 import { BILLABLE_STATUSES, cancelSubscription, fetchSubscription, razorpayConfigured } from "../lib/razorpay";
 import { buildMe, isSuperAdmin, loadOrgsForUser, toAuditDTO, toInvitationDTO, toWorkspaceDTO } from "../lib/serialize";
 import { uniqueSlug } from "../lib/slug";
-import { loadOrg, requirePermission } from "../middleware/auth";
+import { loadOrg, requirePermission, requireVerifiedEmail } from "../middleware/auth";
 import { aiWalletRouter } from "./ai-wallet.routes";
 import { billingRouter } from "./billing.routes";
 import { integrationsRouter } from "./integrations.routes";
@@ -259,7 +259,7 @@ async function sendInvite(orgName: string, inviterName: string, email: string, r
   });
 }
 
-orgsRouter.post("/:orgId/invitations", requirePermission("members:manage"), async (req, res) => {
+orgsRouter.post("/:orgId/invitations", requirePermission("members:manage"), requireVerifiedEmail, async (req, res) => {
   const input = parse(inviteMemberSchema, req.body);
   const orgId = req.org!.id;
 
@@ -297,7 +297,7 @@ orgsRouter.post("/:orgId/invitations", requirePermission("members:manage"), asyn
   res.status(201).json(toInvitationDTO(invite));
 });
 
-orgsRouter.post("/:orgId/invitations/:inviteId/resend", requirePermission("members:manage"), async (req, res) => {
+orgsRouter.post("/:orgId/invitations/:inviteId/resend", requirePermission("members:manage"), requireVerifiedEmail, async (req, res) => {
   const invite = await prisma.invitation.findFirst({
     where: { id: req.params.inviteId as string, orgId: req.org!.id, acceptedAt: null },
   });
@@ -359,7 +359,11 @@ orgsRouter.post("/:orgId/workspaces", requirePermission("workspaces:manage"), as
 });
 
 orgsRouter.patch("/:orgId/workspaces/:workspaceId", requirePermission("workspaces:manage"), async (req, res) => {
-  const input = parse(workspaceSchema.partial(), req.body);
+  const parsed = parse(workspaceSchema.partial(), req.body);
+  // zod applies the schema's defaults (INR, Asia/Kolkata) even inside .partial(), so keep only the fields that were sent;
+  // otherwise a rename would reset the currency and timezone.
+  const sent = req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>) : {};
+  const input = Object.fromEntries(Object.entries(parsed).filter(([k]) => sent[k] !== undefined)) as typeof parsed;
   const ws = await prisma.workspace.findFirst({ where: { id: req.params.workspaceId as string, orgId: req.org!.id, archivedAt: null } });
   if (!ws) throw notFound("Workspace");
   const updated = await prisma.workspace.update({

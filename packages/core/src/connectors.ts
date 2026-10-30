@@ -49,8 +49,8 @@ export function connectors(): ConnectorRegistry {
       clientSecret: process.env.AMAZON_CLIENT_SECRET || undefined,
     },
     x: {
-      clientId: process.env.X_CLIENT_ID || undefined,
-      clientSecret: process.env.X_CLIENT_SECRET || undefined,
+      consumerKey: process.env.X_CONSUMER_KEY || undefined,
+      consumerSecret: process.env.X_CONSUMER_SECRET || undefined,
     },
     apple: {
       clientId: process.env.APPLE_ADS_CLIENT_ID || undefined,

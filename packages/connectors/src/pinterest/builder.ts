@@ -3,7 +3,7 @@
  * campaign → ad groups (+ keywords) → Pins on a secret board → ads.
  */
 import { type BuilderDraft, type BuilderOptions, type TargetingKind, type TargetingSearchResult } from "@ashniva/shared";
-import { bool, budgetOf, countryCodes, dateOf, included, keywords, mediaOf, num, str, strs } from "../builder-values";
+import { bool, budgetOf, builderZone, countryCodes, dayOf, included, instantOf, keywords, mediaOf, num, str, strs } from "../builder-values";
 import { ConnectorError } from "../errors";
 import type { AccountStructure, BuilderAsset } from "../types";
 
@@ -81,14 +81,21 @@ async function videoMediaId(api: PinterestApi, asset: BuilderAsset) {
 
 const b64 = async (a: BuilderAsset) => ({ content_type: a.mimeType === "image/png" ? "image/png" : "image/jpeg", data: (await a.load()).toString("base64") });
 
-export async function pinterestCreateCampaign(api: PinterestApi, account: { externalId: string; currency: string }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
+export async function pinterestCreateCampaign(api: PinterestApi, account: { externalId: string; currency: string; timezone?: string | null }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
   const acct = account.externalId;
   const c = draft.campaign;
   const status = c.launchStatus === "ACTIVE" ? "ACTIVE" : "PAUSED";
   const cbo = bool(c, "cbo");
   const campaignBudget = cbo ? budgetOf(c) : null;
-  const start = dateOf(c, "startDate");
-  const end = dateOf(c, "endDate");
+  // Dates are days in the ad account's zone: start of the start day, end of the end day.
+  // The schedule lives on each ad group (the campaign form has none), so the campaign gets no
+  // start/end time of its own; its reported window spans its ad groups.
+  const tz = builderZone(account);
+  const groupDays = draft.adGroups.map((g) => ({ start: dayOf(g.values, "startDate"), end: dayOf(g.values, "endDate") }));
+  const startDays = groupDays.map((d) => d.start).filter((d): d is string => Boolean(d)).sort();
+  const endDays = groupDays.map((d) => d.end);
+  const campaignStartDay = startDays[0] ?? null;
+  const campaignEndDay = endDays.length && endDays.every(Boolean) ? (endDays as string[]).sort()[endDays.length - 1]! : null;
   const objective = String(draft.setup.objective);
 
   const campaign = firstItem(
@@ -98,8 +105,6 @@ export async function pinterestCreateCampaign(api: PinterestApi, account: { exte
         name: str(c, "name"),
         status,
         objective_type: objective,
-        ...(start ? { start_time: unix(start) } : {}),
-        ...(end ? { end_time: unix(end) } : {}),
         is_campaign_budget_optimization: cbo,
         ...(campaignBudget ? { [campaignBudget.lifetime ? "lifetime_spend_cap" : "daily_spend_cap"]: micro(campaignBudget.amount) } : {}),
       },
@@ -109,7 +114,7 @@ export async function pinterestCreateCampaign(api: PinterestApi, account: { exte
   const campaignId = String(campaign.id);
   const structure: AccountStructure = {
     campaigns: [
-      { externalId: campaignId, name: str(c, "name"), status, deliveryStatus: null, objective, dailyBudget: campaignBudget && !campaignBudget.lifetime ? campaignBudget.amount : null, lifetimeBudget: campaignBudget?.lifetime ? campaignBudget.amount : null, startDate: start ? start.toISOString().slice(0, 10) : null, endDate: end ? end.toISOString().slice(0, 10) : null, updatedAt: new Date(), raw: {} },
+      { externalId: campaignId, name: str(c, "name"), status, deliveryStatus: null, objective, dailyBudget: campaignBudget && !campaignBudget.lifetime ? campaignBudget.amount : null, lifetimeBudget: campaignBudget?.lifetime ? campaignBudget.amount : null, startDate: campaignStartDay, endDate: campaignEndDay, updatedAt: new Date(), raw: {} },
     ],
     adGroups: [],
     ads: [],
@@ -120,8 +125,8 @@ export async function pinterestCreateCampaign(api: PinterestApi, account: { exte
       const v = g.values;
       const budget = cbo ? null : budgetOf(v);
       if (!cbo && !budget) throw new ConnectorError("INVALID_REQUEST", `Enter a budget for ad group “${str(v, "name")}”.`);
-      const gStart = dateOf(v, "startDate") ?? start;
-      const gEnd = dateOf(v, "endDate") ?? end;
+      const gStart = instantOf(v, "startDate", tz);
+      const gEnd = instantOf(v, "endDate", tz, "end");
       const bid = str(v, "bidStrategy") || "AUTOMATIC_BID";
       const spec: Row = { LOCATION: countryCodes(v) };
       if (strs(v, "languages").length) spec.LOCALE = strs(v, "languages");

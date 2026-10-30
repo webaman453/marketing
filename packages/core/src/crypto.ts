@@ -20,8 +20,10 @@ export function encryptSecret(plain: string): string {
 }
 
 export function decryptSecret(payload: string): string {
-  const [version, iv, tag, data] = payload.split(".");
-  if (version !== VERSION || !iv || !tag || !data) throw new Error("Unrecognized encrypted payload");
+  const parts = payload.split(".");
+  const [version, iv, tag, data] = parts;
+  // The data part is legitimately empty for an empty plaintext, so only the IV and tag must be non-empty.
+  if (parts.length !== 4 || version !== VERSION || !iv || !tag || data === undefined) throw new Error("Unrecognized encrypted payload");
   const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(iv, "base64url"));
   decipher.setAuthTag(Buffer.from(tag, "base64url"));
   return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]).toString("utf8");

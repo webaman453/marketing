@@ -8,7 +8,7 @@ import { COUNTRIES, type BuilderDraft, type BuilderOptions, type TargetingKind, 
 import {
   bool,
   budgetOf,
-  dateOf,
+  dayOf,
   excluded,
   included,
   keywords,
@@ -106,8 +106,11 @@ async function languageConstants(api: GoogleApi, codes: string[]) {
   return rows.map((r) => String(r.languageConstant.resourceName));
 }
 
-/** "2026-10-08" → "2026-10-08 00:00:00" (Campaign.start_date_time format). */
-const dateTime = (d: Date | null, endOfDay = false) => (d ? `${d.toISOString().slice(0, 10)} ${endOfDay ? "23:59:59" : "00:00:00"}` : undefined);
+/**
+ * "2026-10-08" → "2026-10-08 00:00:00" (Campaign.start_date_time format). Google
+ * reads it in the account's own timezone, so the typed day goes through as is.
+ */
+const dateTime = (day: string | null, endOfDay = false) => (day ? `${day} ${endOfDay ? "23:59:59" : "00:00:00"}` : undefined);
 
 const ratio = (a: BuilderAsset) => (a.width && a.height ? a.width / a.height : 1);
 
@@ -247,8 +250,8 @@ export async function googleCreateCampaign(
   });
 
   const campaignRn = temp("campaigns");
-  const start = dateOf(c, "startDate");
-  const end = dateOf(c, "endDate");
+  const start = dayOf(c, "startDate");
+  const end = dayOf(c, "endDate");
   const campaign: Record<string, unknown> = {
     resourceName: campaignRn,
     name: str(c, "name"),
@@ -547,8 +550,8 @@ export async function googleCreateCampaign(
         objective: type,
         dailyBudget: budget.lifetime ? null : budget.amount,
         lifetimeBudget: budget.lifetime ? budget.amount : null,
-        startDate: start ? start.toISOString().slice(0, 10) : null,
-        endDate: end ? end.toISOString().slice(0, 10) : null,
+        startDate: start,
+        endDate: end,
         updatedAt: new Date(),
         raw: { channelType: channel, budgetResourceName: resourceAt(0), budgetShared: false },
       },

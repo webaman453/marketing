@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DisplayRectangle, GmailAd, NativeCard, SearchAd, ShoppingAd, YouTubeInFeed, YouTubeInStream, YouTubeShorts } from "./google";
 import { FacebookFeed, FacebookRightColumn, InstagramFeed, VerticalMeta } from "./meta";
+import { AmazonShopping, AppStoreSearch, DisplayBanner, NativeFeed, SpotifyNowPlaying, VideoInStream, XFeed } from "./networks";
 import { normalizeAd, type NormalizedAd } from "./normalize";
 import { LinkedInFeed, LinkedInMessage, LinkedInTextAd, PinterestCloseup, PinterestGrid, SnapStory, TikTokFeed } from "./social";
 
@@ -40,7 +41,17 @@ export const PLACEMENT_LABEL: Record<PlacementPreview, string> = {
   snap_story: "Snapchat",
   pinterest_grid: "Pinterest home feed",
   pinterest_closeup: "Pinterest close-up",
+  x_feed: "X timeline",
+  app_store_search: "App Store search",
+  amazon_shopping: "Amazon search results",
+  spotify_audio: "Spotify · now playing",
+  native_feed: "Publisher site · native",
+  display_banner: "Publisher site · banner",
+  video_instream: "Video player · pre-roll",
 };
+
+/** Label for a placement chip, even for an id this build doesn't know yet. */
+export const placementLabel = (p: string) => PLACEMENT_LABEL[p as PlacementPreview] ?? p.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 const SEARCH: PlacementPreview[] = ["google_search_mobile", "google_search_desktop", "bing_search"];
 
@@ -96,6 +107,23 @@ export function AdPlacement({ ad, placement, combo = 0, device = "mobile" }: { a
       return <PinterestGrid ad={ad} />;
     case "pinterest_closeup":
       return <PinterestCloseup ad={ad} />;
+    case "x_feed":
+      return <XFeed ad={ad} />;
+    case "app_store_search":
+      return <AppStoreSearch ad={ad} />;
+    case "amazon_shopping":
+      return <AmazonShopping ad={ad} />;
+    case "spotify_audio":
+      return <SpotifyNowPlaying ad={ad} />;
+    case "native_feed":
+      return <NativeFeed ad={ad} />;
+    case "display_banner":
+      return <DisplayBanner ad={ad} />;
+    case "video_instream":
+      return <VideoInStream ad={ad} />;
+    default:
+      // A placement this build has no mockup for (e.g. a newer spec): show a neutral card instead of nothing.
+      return <NativeFeed ad={ad} />;
   }
 }
 
@@ -104,7 +132,7 @@ export function PreviewPanel({ data, placements, className, compact }: { data: A
   const [chosen, setChosen] = useState<PlacementPreview | null>(null);
   const [combo, setCombo] = useState(0);
   const [device, setDevice] = useState<"mobile" | "desktop">("mobile");
-  const placement = chosen && placements.includes(chosen) ? chosen : placements[0]!;
+  const placement = chosen && placements.includes(chosen) ? chosen : (placements[0] ?? "native_feed");
   const ad = useMemo(() => normalizeAd(data), [data]);
   const isSearch = SEARCH.includes(placement);
 
@@ -121,7 +149,7 @@ export function PreviewPanel({ data, placements, className, compact }: { data: A
               p === placement ? "border-primary bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:text-foreground",
             )}
           >
-            {PLACEMENT_LABEL[p]}
+            {placementLabel(p)}
           </button>
         ))}
       </div>

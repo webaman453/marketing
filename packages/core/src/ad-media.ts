@@ -6,7 +6,7 @@
 import { prisma, type Prisma } from "@ashniva/db";
 import type { AdMedia } from "@ashniva/connectors";
 import { connectors } from "./connectors";
-import { getAccessToken } from "./tokens";
+import { getConnectorAuth } from "./tokens";
 
 export const adWithConnection = {
   adAccount: { include: { connection: true } },
@@ -33,7 +33,7 @@ export async function getAdMedia(ad: AdWithConnection): Promise<AdMedia & { live
   if (!connector.fetchAdMedia) return { ...syncedFallback(ad), live: false };
   try {
     const media = await connector.fetchAdMedia(
-      { accessToken: await getAccessToken(connection) },
+      await getConnectorAuth(connection),
       { externalId: ad.adAccount.externalId, currency: ad.adAccount.currency, meta: ad.adAccount.meta as Record<string, unknown> | null },
       { externalId: ad.externalId },
     );

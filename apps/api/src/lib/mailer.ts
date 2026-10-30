@@ -30,11 +30,14 @@ function render({ heading, body, cta }: Mail) {
 </body></html>`;
 }
 
+/** Tests swap `deliver` to capture outgoing mail instead of sending it. */
+export const mailTransport = { deliver: deliverEmail };
+
 /** Sends through Resend when configured; otherwise logs the email (development). */
 export async function sendMail(mail: Mail) {
   try {
     // SMTP or Resend, whichever the admin console (or .env) has set up.
-    const sent = await deliverEmail({ to: [mail.to], subject: mail.subject, html: render(mail) });
+    const sent = await mailTransport.deliver({ to: [mail.to], subject: mail.subject, html: render(mail) });
     if (!sent) logger.info({ to: mail.to, subject: mail.subject, link: mail.cta?.url }, "📧 Email (not sent: no SMTP or Resend configured)");
     else logger.info({ to: mail.to, subject: mail.subject }, "📧 Email sent");
   } catch (err) {

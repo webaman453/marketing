@@ -237,7 +237,8 @@ export function KeywordsInput({ field, value, onChange }: { field: KeywordsField
   const env = useBuilderEnv();
   const list = (Array.isArray(value) ? value : []) as KeywordValue[];
   const [text, setText] = useState("");
-  const [match, setMatch] = useState<KeywordValue["matchType"]>(field.negative ? "PHRASE" : "PHRASE");
+  // Phrase match is the usual starting point, but some platforms (e.g. Apple) don't offer it.
+  const [match, setMatch] = useState<KeywordValue["matchType"]>(field.matchTypes.includes("PHRASE") ? "PHRASE" : (field.matchTypes[0] ?? "BROAD"));
   const [ideas, setIdeas] = useState<AiKeywordIdea[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -574,9 +575,11 @@ export function RepeaterInput({ field, value, onChange, ctx, errors }: { field: 
         <div key={i} className="rounded-lg border bg-muted/20 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-muted-foreground uppercase">{field.itemLabel} {i + 1}</span>
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => onChange(items.filter((_, j) => j !== i))} aria-label={`Remove ${field.itemLabel.toLowerCase()} ${i + 1}`}>
-              <X />
-            </Button>
+            {items.length > field.min && (
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => onChange(items.filter((_, j) => j !== i))} aria-label={`Remove ${field.itemLabel.toLowerCase()} ${i + 1}`}>
+                <X />
+              </Button>
+            )}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {field.fields.map((f) => (

@@ -2,9 +2,9 @@ import { prisma, type Membership, type Organization, type Workspace } from "@ash
 import { assertFeature, assertNotLocked } from "@ashniva/core";
 import { can, hasAllWorkspaceAccess, type Feature, type Permission } from "@ashniva/shared";
 import type { NextFunction, Request, Response } from "express";
-import { forbidden, notFound, unauthorized } from "../lib/errors";
+import { forbidden, HttpError, notFound, unauthorized } from "../lib/errors";
 import { isSuperAdmin } from "../lib/serialize";
-import { ACCESS_COOKIE, verifyAccess } from "../lib/session";
+import { ACCESS_COOKIE, clearSessionCookies, verifyAccess } from "../lib/session";
 
 declare global {
   namespace Express {
@@ -18,11 +18,20 @@ declare global {
   }
 }
 
-/** Requires a valid access token cookie. */
-export function requireAuth(req: Request, _res: Response, next: NextFunction) {
+/**
+ * Requires a valid access token cookie whose session still exists and is not revoked.
+ * A deleted user's sessions are gone with them (cascade), so their still-unexpired
+ * token gets a 401 (cookies cleared, so the app goes to sign-in) instead of failing later.
+ */
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.[ACCESS_COOKIE] as string | undefined;
   if (!token) throw unauthorized();
   const claims = verifyAccess(token);
+  const session = await prisma.session.findUnique({ where: { id: claims.sid }, select: { userId: true, revokedAt: true } });
+  if (!session || session.userId !== claims.sub || session.revokedAt) {
+    clearSessionCookies(res);
+    throw unauthorized("Your session has ended. Please sign in again.");
+  }
   req.userId = claims.sub;
   req.sessionId = claims.sid;
   next();
@@ -86,5 +95,14 @@ export const requireFeature = (feature: Feature) => (req: Request, _res: Respons
 export async function requireSuperAdmin(req: Request, _res: Response, next: NextFunction) {
   const user = await prisma.user.findUnique({ where: { id: req.userId! } });
   if (!user || !isSuperAdmin(user)) throw forbidden();
+  next();
+}
+
+/** For actions that email other people on the user's behalf (team invites), so an unproven address can't send them. */
+export async function requireVerifiedEmail(req: Request, _res: Response, next: NextFunction) {
+  const user = await prisma.user.findUnique({ where: { id: req.userId! }, select: { emailVerifiedAt: true } });
+  if (!user?.emailVerifiedAt) {
+    throw new HttpError(403, "EMAIL_NOT_VERIFIED", "Verify your email address first. Use the link we emailed you, or resend it from the banner at the top.");
+  }
   next();
 }

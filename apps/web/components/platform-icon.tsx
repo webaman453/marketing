@@ -12,7 +12,7 @@ const GLYPH: Record<Platform, string> = {
   AMAZON: "a",
   X: "X",
   APPLE: "A",
-  SPOTIFY: "S",
+  SPOTIFY: "Sp",
   CRITEO: "C",
   TABOOLA: "T",
   OUTBRAIN: "O",
@@ -23,6 +23,9 @@ const GLYPH: Record<Platform, string> = {
   ZEPTO: "Z",
   NAUKRI: "N",
 };
+
+const DARK_TEXT = new Set<Platform>(["SNAPCHAT", "AMAZON"]);
+const BLACK_BRAND = new Set<Platform>(["X", "APPLE"]);
 
 const SIZES = {
   xs: "size-4 rounded-[4px] text-[8px]",
@@ -42,14 +45,17 @@ export function PlatformIcon({
   className?: string;
 }) {
   const info = PLATFORM_INFO[platform];
-  // Snapchat yellow needs dark text for contrast.
-  const dark = platform === "SNAPCHAT";
+  // Snapchat yellow and Amazon orange need dark text for contrast.
+  const dark = DARK_TEXT.has(platform);
+  // Near-black brands would vanish on a dark background, so they get a light ring there.
+  const blackBrand = BLACK_BRAND.has(platform);
   return (
     <span
       title={info.name}
       className={cn(
         "inline-flex shrink-0 items-center justify-center font-bold tracking-tight ring-1 ring-black/5 select-none",
         dark ? "text-neutral-900" : "text-white",
+        blackBrand && "dark:ring-white/25",
         SIZES[size],
         className,
       )}

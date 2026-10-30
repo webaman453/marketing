@@ -25,7 +25,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { FormField } from "@/components/form-field";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -365,8 +365,10 @@ function CredentialForm({
       ]),
     ),
   );
-  useEffect(() => {
-    if (!status) return;
+  // When saved values (re)load, fill in plain fields nobody has typed in (adjusting state during render, not in an effect).
+  const [filledFrom, setFilledFrom] = useState(status);
+  if (status && status !== filledFrom) {
+    setFilledFrom(status);
     setValues((prev) => {
       const next = { ...prev };
       for (const f of group.fields) {
@@ -375,7 +377,7 @@ function CredentialForm({
       }
       return next;
     });
-  }, [status, group.fields]);
+  }
 
   const [busy, setBusy] = useState<"save" | "test" | "clear" | null>(null);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(
@@ -421,11 +423,20 @@ function CredentialForm({
       applies(f),
   );
 
-  const replacedIdentityWithoutSecret = group.fields.some(
-    (f) => f.secret && current(f.key)?.set && !(values[f.key] ?? "").trim(),
-  ) && group.fields.some(
-    (f) => !f.secret && !f.optional && !f.options && (values[f.key] ?? "").trim() !== (current(f.key)?.display ?? ""),
-  );
+  // Only a platform's app/client ID and its own secret belong together: a new ID with the old secret can't sign in.
+  const replacedIdentityWithoutSecret =
+    group.kind === "platform" &&
+    group.fields.some((id) => {
+      const match = /^(.*)_(CLIENT|APP)_ID$/.exec(id.key);
+      if (!match || id.secret || !applies(id)) return false;
+      const secret = group.fields.find(
+        (f) => f.secret && [`${match[1]}_${match[2]}_SECRET`, `${match[1]}_SECRET`].includes(f.key),
+      );
+      if (!secret || !applies(secret) || !current(secret.key)?.set || (values[secret.key] ?? "").trim()) return false;
+      const saved = current(id.key)?.display ?? "";
+      const typed = (values[id.key] ?? "").trim();
+      return typed !== "" && typed !== saved;
+    });
 
   async function save(thenTest: boolean) {
     if (replacedIdentityWithoutSecret) {

@@ -56,7 +56,7 @@ export default function CampaignDetailPage() {
   }
   if (!query.data) return <DetailSkeleton back={back} />;
 
-  const { campaign: c, timeseries, adGroups, ads, activity } = query.data;
+  const { campaign: c, timeseries, adGroups, ads, activity, fx } = query.data;
   if (!isPlatformShown(c.platform)) {
     return (
       <div className="space-y-6">
@@ -74,6 +74,9 @@ export default function CampaignDetailPage() {
   const budgetLabel = c.dailyBudget != null ? perDay(c.dailyBudget) : groupBudget > 0 ? `${perDay(groupBudget)} across ${terms.adGroup.toLowerCase()}s` : "not set";
   const editable = can("campaigns:edit") && (c.status === "ACTIVE" || c.status === "PAUSED");
   const m = c.metrics;
+  // Counts follow the workspace's number style; money stays in what the account bills in.
+  const ws = workspace.currency;
+  const count = (v: number | null, decimals = 0) => number(v, { decimals, currency: ws });
 
   return (
     <div className={cn("space-y-6", query.isPlaceholderData && "opacity-70 transition-opacity")}>
@@ -126,19 +129,27 @@ export default function CampaignDetailPage() {
 
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-3 xl:grid-cols-6">
         {[
-          ["Spend", money(m.spend, c.currency)],
-          ["Impressions", number(m.impressions)],
-          ["Clicks", number(m.clicks)],
-          ["CTR", percent(m.ctr)],
-          ["Conversions", number(m.conversions, { decimals: 1 })],
-          ["ROAS", multiple(m.roas)],
-        ].map(([label, value]) => (
+          ["Spend", money(m.spend, c.currency), c.converted ? `≈ ${money(c.converted.spend, ws)}` : null],
+          ["Impressions", count(m.impressions), null],
+          ["Clicks", count(m.clicks), null],
+          ["CTR", percent(m.ctr), null],
+          ["Conversions", count(m.conversions, 1), null],
+          ["ROAS", multiple(m.roas), null],
+        ].map(([label, value, approx]) => (
           <div key={label} className="bg-card px-4 py-3.5">
             <div className="text-xs font-medium text-muted-foreground">{label}</div>
             <div className="mt-1 text-lg font-semibold tracking-tight tabular">{value}</div>
+            {approx && <div className="text-xs text-muted-foreground tabular" title={`In ${ws} at daily ECB rates`}>{approx}</div>}
           </div>
         ))}
       </div>
+      {c.currency !== ws && (
+        <p className="-mt-3 text-xs text-muted-foreground">
+          This ad account bills in {c.currency}, so amounts on this page are in {c.currency}.
+          {fx?.conversion === "converted" && ` Converted ${ws} figures use daily ECB rates.`}
+          {fx?.conversion === "unavailable" && ` Exchange rates are unavailable right now, so there is no ${ws} equivalent.`}
+        </p>
+      )}
 
       <PerformanceChart series={timeseries} currency={c.currency} />
 
@@ -181,9 +192,9 @@ export default function CampaignDetailPage() {
                     <TableCell><StatusDot status={g.status} /></TableCell>
                     <TableCell className="text-right tabular">{g.adCount}</TableCell>
                     <TableCell className="text-right font-medium tabular">{money(g.metrics.spend, c.currency)}</TableCell>
-                    <TableCell className="text-right tabular">{number(g.metrics.clicks)}</TableCell>
+                    <TableCell className="text-right tabular">{count(g.metrics.clicks)}</TableCell>
                     <TableCell className="text-right tabular">{percent(g.metrics.ctr)}</TableCell>
-                    <TableCell className="text-right tabular">{number(g.metrics.conversions, { decimals: 1 })}</TableCell>
+                    <TableCell className="text-right tabular">{count(g.metrics.conversions, 1)}</TableCell>
                     <TableCell className="text-right tabular">{money(g.metrics.cpa, c.currency, { decimals: 0 })}</TableCell>
                     <TableCell className="pr-4 text-right tabular">{multiple(g.metrics.roas)}</TableCell>
                   </TableRow>
@@ -217,9 +228,9 @@ export default function CampaignDetailPage() {
                     </TableCell>
                     <TableCell><StatusDot status={a.status} /></TableCell>
                     <TableCell className="text-right font-medium tabular">{money(a.metrics.spend, c.currency)}</TableCell>
-                    <TableCell className="text-right tabular">{number(a.metrics.impressions)}</TableCell>
+                    <TableCell className="text-right tabular">{count(a.metrics.impressions)}</TableCell>
                     <TableCell className="text-right tabular">{percent(a.metrics.ctr)}</TableCell>
-                    <TableCell className="text-right tabular">{number(a.metrics.conversions, { decimals: 1 })}</TableCell>
+                    <TableCell className="text-right tabular">{count(a.metrics.conversions, 1)}</TableCell>
                     <TableCell className="text-right tabular">{multiple(a.metrics.roas)}</TableCell>
                     <TableCell className="pr-4 text-right">
                       <Button

@@ -49,3 +49,33 @@ export async function createOwnedOrg(
     },
   });
 }
+
+/**
+ * Called once an operator (SUPER_ADMIN_EMAILS) verifies their email: the org they signed up
+ * with was created unpaid, so it gets the complimentary access it would have had. Only orgs
+ * they own that are still in the untouched unpaid state, so nothing billed is changed.
+ */
+export async function grantOperatorOrgs(tx: Prisma.TransactionClient, userId: string) {
+  const orgs = await tx.organization.findMany({
+    where: {
+      plan: "TRIAL",
+      subscriptionStatus: "EXPIRED",
+      trialEndsAt: null,
+      billingSubscriptionId: null,
+      memberships: { some: { userId, role: "OWNER" } },
+    },
+  });
+  const tokens = freeAiTokens();
+  for (const org of orgs) {
+    await tx.organization.update({
+      where: { id: org.id },
+      data: {
+        plan: "AGENCY",
+        subscriptionStatus: "ACTIVE",
+        aiTokenBalance: { increment: tokens },
+        aiLedger: { create: { type: "FREE_GRANT", tokens, balanceAfter: org.aiTokenBalance + tokens, note: "Free AI tokens" } },
+      },
+    });
+  }
+  return orgs;
+}

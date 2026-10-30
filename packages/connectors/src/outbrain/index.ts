@@ -3,10 +3,10 @@
  * Docs: https://developer.outbrain.com/home-page/amplify-api/
  */
 import type { BuilderDraft, BuilderOptions, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
-import { ConnectorError } from "../errors";
-import { requestJson, type RequestOptions } from "../http";
-import { apiError, selfRedirect } from "../oauth-flow";
-import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens } from "../types";
+import { ConnectorError, noRowsUnlessFatal } from "../errors";
+import { allPages, requestJson, type RequestOptions } from "../http";
+import { apiError, requireCredentials, selfRedirect } from "../oauth-flow";
+import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens, PlatformCredentials } from "../types";
 import { outbrainCreateCampaign, type OutbrainApi } from "./builder";
 
 export interface OutbrainConfig {
@@ -24,10 +24,17 @@ export class OutbrainConnector implements AdPlatformConnector {
     return Boolean(this.config.apiToken);
   }
 
+  /**
+   * A customer's connection sends its own token. The operator's own connection
+   * (no stored credentials) uses the token from config when one is set, so a
+   * rotated OUTBRAIN_API_TOKEN takes effect at once; the copy made at connect
+   * time is only its fallback.
+   */
   private call<T>(path: string, auth: ConnectorAuth, opts: RequestOptions = {}) {
+    const token = auth.credentials ? auth.accessToken : this.config.apiToken || auth.accessToken;
     return requestJson<T>(
       `${API}${path}`,
-      { ...opts, headers: { "OB-TOKEN-V1": auth.accessToken, ...opts.headers } },
+      { ...opts, headers: { "OB-TOKEN-V1": token, ...opts.headers } },
       apiError("Outbrain"),
     );
   }
@@ -44,6 +51,11 @@ export class OutbrainConnector implements AdPlatformConnector {
 
   async refreshTokens(_refreshToken: string) {
     return null;
+  }
+
+  /** The customer's own Amplify token is the access token; Connect checks it by listing marketers. */
+  async connectWithCredentials(credentials: PlatformCredentials): Promise<OAuthTokens> {
+    return { accessToken: requireCredentials(this.platform, credentials).apiToken!, scopes: [] };
   }
 
   async getUser(auth: ConnectorAuth) {
@@ -83,7 +95,9 @@ export class OutbrainConnector implements AdPlatformConnector {
       });
       const gid = `${cid}:links`;
       structure.adGroups.push({ externalId: gid, campaignExternalId: cid, name: "Promoted links", status: "ACTIVE", dailyBudget: null, bidStrategy: c.cpc != null ? "CPC" : null, targeting: null, raw: {} });
-      const links = (await this.call<{ promotedLinks?: Row[] }>(`/campaigns/${cid}/promotedLinks`, auth, { query: { limit: 100 } }).catch(() => ({ promotedLinks: [] }))).promotedLinks ?? [];
+      // A campaign whose links cannot be listed (a 4xx about it) has no ads here; an expired token,
+      // missing permission, rate limit or outage fails the sync instead of saving it without ads.
+      const links = await this.promotedLinks(auth, cid).catch(noRowsUnlessFatal<Row>);
       for (const link of links) {
         structure.ads.push({
           externalId: String(link.id),
@@ -102,25 +116,49 @@ export class OutbrainConnector implements AdPlatformConnector {
     return structure;
   }
 
+  /** Every promoted link of a campaign: pages of `limit` with `offset`, until `totalCount` (or a short page). */
+  private promotedLinks(auth: ConnectorAuth, campaignId: string) {
+    const limit = 100;
+    return allPages<Row, number>(0, async (offset) => {
+      const res = await this.call<{ promotedLinks?: Row[]; totalCount?: number }>(`/campaigns/${encodeURIComponent(campaignId)}/promotedLinks`, auth, { query: { limit, offset } });
+      const rows = res.promotedLinks ?? [];
+      const next = offset + rows.length;
+      const total = res.totalCount;
+      return { items: rows, next: total != null ? (next < Number(total) ? next : null) : rows.length >= limit ? next : null };
+    }, "Outbrain promoted link list");
+  }
+
+  /**
+   * Daily rows per campaign from the periodic report (breakdown=daily). Only days
+   * the report returns are recorded; a range total is never written onto one day.
+   * RISK: endpoint and response shape (campaignResults[].results[].metadata.id = day)
+   * follow Outbrain's Amplify docs but are not verified against a live account.
+   */
   async fetchMetrics(auth: ConnectorAuth, account: AccountRef, range: { from: string; to: string }): Promise<ExternalMetricRow[]> {
-    try {
-      const res = await this.call<{ results?: Row[] }>(`/reports/marketers/${account.externalId}/campaigns`, auth, {
-        query: { from: range.from, to: range.to, limit: 500 },
-      });
-      return (res.results ?? []).map((r) => ({
-        date: range.to,
-        level: "CAMPAIGN" as const,
-        externalId: String(r.campaignId ?? r.metadata?.id),
-        impressions: Number(r.metrics?.impressions ?? 0),
-        clicks: Number(r.metrics?.clicks ?? 0),
-        spend: Number(r.metrics?.spend ?? 0),
-        conversions: Number(r.metrics?.conversions ?? 0),
-        conversionValue: Number(r.metrics?.sumValue ?? 0),
-        videoViews: 0,
-      }));
-    } catch {
-      return [];
+    const res = await this.call<{ campaignResults?: Row[] }>(`/reports/marketers/${account.externalId}/campaigns/periodic`, auth, {
+      query: { from: range.from, to: range.to, breakdown: "daily", limit: 500 },
+    }).catch((err) => ({ campaignResults: noRowsUnlessFatal<Row>(err) }));
+    const out: ExternalMetricRow[] = [];
+    for (const campaign of res.campaignResults ?? []) {
+      const id = campaign.campaignId ?? campaign.metadata?.id;
+      if (id == null) continue;
+      for (const r of campaign.results ?? []) {
+        const date = /^\d{4}-\d{2}-\d{2}/.exec(String(r.metadata?.id ?? r.metadata?.fromDate ?? ""))?.[0];
+        if (!date) continue;
+        out.push({
+          date,
+          level: "CAMPAIGN",
+          externalId: String(id),
+          impressions: Number(r.metrics?.impressions ?? 0),
+          clicks: Number(r.metrics?.clicks ?? 0),
+          spend: Number(r.metrics?.spend ?? 0),
+          conversions: Number(r.metrics?.conversions ?? 0),
+          conversionValue: Number(r.metrics?.sumValue ?? 0),
+          videoViews: 0,
+        });
+      }
     }
+    return out;
   }
 
   async setCampaignStatus(auth: ConnectorAuth, _account: AccountRef, campaign: { externalId: string }, status: "ACTIVE" | "PAUSED") {

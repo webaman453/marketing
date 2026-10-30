@@ -1,5 +1,5 @@
 /** Outbrain: campaign budget and geo → promoted link (title, image URL, landing URL). */
-import { budgetFields, launchSection, locationsField, nameField, opts, urlField } from "../common";
+import { budgetFields, campaignIs, launchSection, locationsField, nameField, not, opts, urlField } from "../common";
 import type { PlatformBuilderSpec } from "../types";
 
 export const outbrainSpec: PlatformBuilderSpec = {
@@ -24,10 +24,17 @@ export const outbrainSpec: PlatformBuilderSpec = {
         title: "Bidding",
         fields: [
           { key: "bidType", type: "segmented", label: "Charge by", options: opts([["CPC", "CPC"], ["CPM", "CPM"]]), default: "CPC" },
-          { key: "cpc", type: "money", label: "CPC bid", min: 0.01, required: true, width: "half" },
+          // Same key either way: the connector reads `cpc`.
+          { key: "cpc", type: "money", label: "CPC bid", min: 0.01, required: true, width: "half", showIf: not(campaignIs("bidType", "CPM")), help: "Most you'll pay per click." },
+          { key: "cpc", type: "money", label: "CPM bid", min: 0.01, required: true, width: "half", showIf: campaignIs("bidType", "CPM"), help: "Most you'll pay per 1,000 impressions." },
         ],
       },
-      { id: "budget", title: "Budget", fields: [...budgetFields({}), locationsField()] },
+      {
+        id: "budget",
+        title: "Budget",
+        // The connector sends no schedule, so a lifetime budget would have no end date.
+        fields: [...budgetFields({ lifetime: false, help: "Daily budget for the campaign." }), locationsField({ allowExclude: false, help: "Countries to show the promoted links in." })],
+      },
       launchSection(),
     ],
   },
@@ -52,5 +59,5 @@ export const outbrainSpec: PlatformBuilderSpec = {
   }),
   maxAdGroups: 5,
   maxAds: 20,
-  previews: () => ["google_display_native", "discover"],
+  previews: () => ["native_feed"],
 };

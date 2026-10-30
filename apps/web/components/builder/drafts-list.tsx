@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORM_INFO, isPlatform, isPlatformShown, type DraftDTO, type Platform } from "@ashniva/shared";
+import { PLATFORM_INFO, isPlatform, isPlatformShown, type DraftDTO } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileClock, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -49,7 +49,7 @@ export function DraftsList({ workspaceId, canEdit }: { workspaceId: string; canE
       <ul className="divide-y">
         {open.slice(0, 5).map((d) => (
           <li key={d.id} className="flex items-center gap-3 px-4 py-2.5">
-            {typeof d.payload.platform === "string" && <PlatformIcon platform={d.payload.platform as Platform} size="sm" />}
+            {isPlatform(d.payload.platform) && <PlatformIcon platform={d.payload.platform} size="sm" />}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="truncate text-sm font-medium">{d.name}</span>
@@ -57,7 +57,7 @@ export function DraftsList({ workspaceId, canEdit }: { workspaceId: string; canE
               </div>
               <div className="text-xs text-muted-foreground">
                 {d.status === "FAILED" && d.results?.[0]?.error && <span className="text-destructive">{d.results[0].error.slice(0, 80)} · </span>}
-                {typeof d.payload.platform === "string" && `${PLATFORM_INFO[d.payload.platform as Platform]?.name ?? ""} · `}
+                {isPlatform(d.payload.platform) && `${PLATFORM_INFO[d.payload.platform].name} · `}
                 Edited {timeAgo(d.updatedAt)}
                 {d.createdBy && <> · {d.createdBy}</>}
               </div>

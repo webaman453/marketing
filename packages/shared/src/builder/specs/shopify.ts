@@ -30,8 +30,12 @@ export const shopifySpec: PlatformBuilderSpec = {
           infoField("shopifyNote", "Recorded on the store", "Shopify saves this as a marketing event. It does not serve the ad or spend the budget."),
         ],
       },
-      { id: "budget", title: "Budget", fields: budgetFields({ help: "Stored on the marketing event. Shopify does not spend it." }) },
-      launchSection(),
+      // The marketing event gets no end date from here, so only a daily budget is offered.
+      { id: "budget", title: "Budget", fields: budgetFields({ lifetime: false, help: "Daily budget, stored on the marketing event. Shopify does not spend it." }) },
+      launchSection({
+        paused: { label: "Record as ended", description: "Saves the marketing event with an end time now, for tracking only." },
+        active: { label: "Record as running", description: "Saves the marketing event on the store as running from today." },
+      }),
     ],
   },
   adGroup: {

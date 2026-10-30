@@ -9,9 +9,10 @@
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { googleBuilderOptions, googleCreateCampaign, googleSearchTargeting, type GoogleApi } from "./builder";
-import { ConnectorError } from "../errors";
-import { codeFromStatus, requestJson, type RequestOptions } from "../http";
+import { ConnectorError, expiredGrant } from "../errors";
+import { allPages, codeFromStatus, requestJson, type RequestOptions } from "../http";
 import type {
+  AccountBilling,
   AccountRef,
   AccountStructure,
   AdPlatformConnector,
@@ -95,21 +96,21 @@ export class GoogleAdsConnector implements AdPlatformConnector {
     );
   }
 
-  /** Runs a GAQL query and follows page tokens. */
+  /** Runs a GAQL query and follows page tokens (capped at MAX_PAGES, like every list). */
   private async search(auth: ConnectorAuth, account: AccountRef, query: string): Promise<Row[]> {
     const loginCustomerId = account.meta?.loginCustomerId as string | undefined;
-    const out: Row[] = [];
-    let pageToken: string | undefined;
-    do {
-      const res = await this.ads<{ results?: Row[]; nextPageToken?: string }>(
-        `/customers/${account.externalId}/googleAds:search`,
-        auth,
-        { method: "POST", body: { query, pageToken }, loginCustomerId },
-      );
-      out.push(...(res.results ?? []));
-      pageToken = res.nextPageToken;
-    } while (pageToken);
-    return out;
+    return allPages<Row, string | undefined>(
+      undefined,
+      async (pageToken) => {
+        const res = await this.ads<{ results?: Row[]; nextPageToken?: string }>(
+          `/customers/${account.externalId}/googleAds:search`,
+          auth,
+          { method: "POST", body: { query, pageToken }, loginCustomerId },
+        );
+        return { items: res.results ?? [], next: res.nextPageToken };
+      },
+      "Google Ads query",
+    );
   }
 
   getAuthUrl({ state, redirectUri }: { state: string; redirectUri: string }) {
@@ -155,7 +156,8 @@ export class GoogleAdsConnector implements AdPlatformConnector {
   }
 
   refreshTokens(refreshToken: string) {
-    return this.token({ refresh_token: refreshToken, grant_type: "refresh_token" });
+    // A revoked or expired refresh token is 400 invalid_grant: an expired login, not a bad request.
+    return this.token({ refresh_token: refreshToken, grant_type: "refresh_token" }).catch(expiredGrant);
   }
 
   async revokeAccess(token: string) {
@@ -193,8 +195,9 @@ export class GoogleAdsConnector implements AdPlatformConnector {
            WHERE customer_client.status = 'ENABLED'`,
         );
       } catch (err) {
-        // Accounts that are cancelled or not yet set up reject queries; skip them.
-        if (err instanceof ConnectorError && err.code !== "AUTH_EXPIRED") continue;
+        // Accounts that are cancelled or not yet set up reject queries (403/400); skip them.
+        // Expired logins, rate limits and outages still throw so no account is silently dropped.
+        if (err instanceof ConnectorError && (err.code === "PERMISSION_DENIED" || err.code === "INVALID_REQUEST")) continue;
         throw err;
       }
       for (const r of rows) {
@@ -382,6 +385,80 @@ export class GoogleAdsConnector implements AdPlatformConnector {
             updateMask: "amount_micros",
           },
         ],
+      },
+    });
+  }
+
+  /** The account's approved account budget, if it has one (only monthly-invoiced accounts do). */
+  private async accountBudget(auth: ConnectorAuth, account: AccountRef) {
+    const rows = await this.search(
+      auth,
+      account,
+      `SELECT account_budget.resource_name, account_budget.status, account_budget.approved_spending_limit_micros,
+              account_budget.approved_spending_limit_type, account_budget.amount_served_micros,
+              account_budget.approved_end_date_time, account_budget.billing_setup
+       FROM account_budget
+       WHERE account_budget.status = 'APPROVED'`,
+    );
+    const now = Date.now();
+    // An approved budget whose end has passed no longer limits spend; take the current one.
+    const live = rows.map((r) => r.accountBudget).filter((b) => b && !(b.approvedEndDateTime && Date.parse(b.approvedEndDateTime.replace(" ", "T")) < now));
+    return live[0] ?? null;
+  }
+
+  /**
+   * Account budget (spending limit) and account status. Accounts paid by card have no
+   * account budget: they report no limit and are fine unless suspended.
+   * https://developers.google.com/google-ads/api/docs/billing/account-budgets
+   */
+  async getBilling(auth: ConnectorAuth, account: AccountRef & { currency: string }): Promise<AccountBilling> {
+    const [customer, budget] = await Promise.all([
+      this.search(auth, account, "SELECT customer.status FROM customer LIMIT 1").then((r) => r[0]?.customer),
+      this.accountBudget(auth, account),
+    ]);
+    const infinite = budget?.approvedSpendingLimitType === "INFINITE";
+    const spendLimit = budget && !infinite && budget.approvedSpendingLimitMicros != null ? micros(budget.approvedSpendingLimitMicros) : null;
+    const spent = budget ? micros(budget.amountServedMicros) : null;
+    const status = customer?.status as string | undefined;
+    let health: AccountBilling["health"] = status === "ENABLED" ? "ok" : "unknown";
+    let note: string | null = null;
+    if (status === "SUSPENDED") [health, note] = ["blocked", "Google suspended this account. Check billing and policy in Google Ads."];
+    else if (status === "CANCELED" || status === "CLOSED") [health, note] = ["blocked", "This Google Ads account is cancelled."];
+    else if (spendLimit && spent != null) {
+      const used = spent / spendLimit;
+      if (used >= 1) [health, note] = ["blocked", "Account budget used up. Ads stop until it's raised."];
+      else if (used >= 0.9) [health, note] = ["attention", `${Math.floor(used * 100)}% of the account budget used.`];
+    }
+    return { spendLimit, spentTowardLimit: spent, balanceDue: null, fundsRemaining: spendLimit != null && spent != null ? Math.max(0, spendLimit - spent) : null, health, note };
+  }
+
+  /**
+   * Changes the approved account budget's spending limit with an UPDATE proposal (approved
+   * straight away for accounts on monthly invoicing); null makes it unlimited.
+   * https://developers.google.com/google-ads/api/rest/reference/rest/v21/customers.accountBudgetProposals/mutate
+   */
+  async setSpendLimit(auth: ConnectorAuth, account: AccountRef & { currency: string }, amount: number | null) {
+    const budget = await this.accountBudget(auth, account);
+    if (!budget?.resourceName) {
+      throw new ConnectorError(
+        "UNSUPPORTED",
+        "This Google Ads account is paid by card, so it has no account budget. Use the monthly budget in Ashniva or campaign budgets instead.",
+      );
+    }
+    await this.ads(`/customers/${account.externalId}/accountBudgetProposals:mutate`, auth, {
+      method: "POST",
+      loginCustomerId: account.meta?.loginCustomerId as string | undefined,
+      body: {
+        operation: {
+          create: {
+            proposalType: "UPDATE",
+            accountBudget: budget.resourceName,
+            // Limits are a multiple of the currency's minimum unit (0.01 → 10,000 micros).
+            ...(amount == null
+              ? { proposedSpendingLimitType: "INFINITE" }
+              : { proposedSpendingLimitMicros: String(Math.round(amount * 100) * 10_000) }),
+          },
+        },
       },
     });
   }

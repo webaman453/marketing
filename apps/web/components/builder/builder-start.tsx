@@ -1,7 +1,7 @@
 "use client";
 
 import { BUILDER_SPECS, VISIBLE_PLATFORMS, PLATFORM_INFO, newDraft, setupOptions, type BuilderDraft, type Platform, type Values } from "@ashniva/shared";
-import { ArrowRight, Link2 } from "lucide-react";
+import { ArrowRight, CreditCard, Link2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useWorkspace } from "@/components/app/workspace-context";
@@ -35,9 +35,9 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
   const account = platformAccounts.find((a) => a.id === accountId) ?? (platformAccounts.length === 1 ? platformAccounts[0] : undefined);
   const choices = spec ? spec.setup.filter((c) => !c.showIf || c.showIf(setup)) : [];
   const unchosen = choices.find((c) => !setupOptions(c, setup).some((o) => o.value === setup[c.key] && !o.disabled));
-  const complete = Boolean(spec && account && !unchosen && name.trim().length >= 2);
+  const complete = Boolean(spec && account && !unchosen && name.trim().length >= 2 && !org.locked);
   // Says what's still missing, so a greyed-out Continue never leaves people guessing.
-  const missing = !platform ? null : !account ? "Select an ad account" : unchosen ? `Select the ${unchosen.label.toLowerCase()}` : name.trim().length < 2 ? "Name your campaign" : null;
+  const missing = !platform ? null : platformAccounts.length === 0 ? `Connect a ${PLATFORM_INFO[platform].name} ad account` : !account ? "Select an ad account" : unchosen ? `Select the ${unchosen.label.toLowerCase()}` : name.trim().length < 2 ? "Name your campaign" : null;
   const locked = Boolean(preset?.platform);
 
   if (accounts.isLoading) return <Skeleton className="h-[480px] rounded-xl" />;
@@ -45,20 +45,38 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
   return (
     <Card className="gap-0 py-0">
       <div className="space-y-8 p-6 sm:p-8">
-        {locked && platform && platformAccounts.length === 0 && (
+        {org.locked && (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
+            <div className="font-medium">Choose a plan to create campaigns.</div>
+            <p className="mt-0.5 text-muted-foreground">This organization is read-only until a plan is active, so nothing here can be saved or published yet.</p>
+            <Button asChild size="sm" className="mt-3">
+              <Link href={`/w/${workspace.id}/settings/billing`}><CreditCard /> Choose a plan</Link>
+            </Button>
+          </div>
+        )}
+        {platform && platformAccounts.length === 0 && !accounts.isError && (locked || (accounts.data ?? []).length > 0) && (
           <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
             {PLATFORM_INFO[platform].availability === "coming_soon" ? (
               <>
                 <div className="font-medium">{PLATFORM_INFO[platform].name} cannot be connected from here yet.</div>
-                <p className="mt-0.5 text-muted-foreground">The fields below match their own screen. They have not opened an API, so this form cannot publish the ad.</p>
+                <p className="mt-0.5 text-muted-foreground">They have not opened an API, so a campaign cannot be created for {PLATFORM_INFO[platform].name} from Ashniva Ads yet.</p>
               </>
             ) : (
               <>
-                <div className="font-medium">Connect {PLATFORM_INFO[platform].name} to publish this form.</div>
-                <p className="mt-0.5 text-muted-foreground">The fields below are the same ones {PLATFORM_INFO[platform].name} asks for. Connect an account in this workspace when you are ready to create the ad.</p>
-                <Button asChild size="sm" className="mt-3" variant="outline">
-                  <Link href={`/w/${workspace.id}/integrations`}><Link2 /> Connect {PLATFORM_INFO[platform].name}</Link>
-                </Button>
+                <div className="font-medium">Connect a {PLATFORM_INFO[platform].name} ad account first.</div>
+                <p className="mt-0.5 text-muted-foreground">
+                  Campaigns are created on an ad account, and this workspace has none for {PLATFORM_INFO[platform].name}. Connect one in Integrations, then come back to continue.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/w/${workspace.id}/integrations`}><Link2 /> Go to Integrations</Link>
+                  </Button>
+                  {org.locked && (
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/w/${workspace.id}/settings/billing`}><CreditCard /> Choose a plan</Link>
+                    </Button>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -170,12 +188,18 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
               {PLATFORM_INFO[platform].name} · {account.name}
               {account.sample && <Badge variant="secondary" className="ml-2 text-[10px]">Sample account</Badge>}
             </>
+          ) : platform ? (
+            PLATFORM_INFO[platform].name
           ) : (
             "Choose a platform to begin"
           )}
         </span>
         <div className="flex items-center gap-3">
-          {missing && <span className="hidden text-xs text-muted-foreground sm:inline">{missing} to continue</span>}
+          {org.locked ? (
+            <span className="hidden text-xs text-muted-foreground sm:inline">Choose a plan to continue</span>
+          ) : (
+            missing && <span className="hidden text-xs text-muted-foreground sm:inline">{missing} to continue</span>
+          )}
           <Button disabled={!complete} onClick={() => spec && account && onStart(newDraft(spec, account.id, setup, name.trim()))}>
             Continue <ArrowRight />
           </Button>

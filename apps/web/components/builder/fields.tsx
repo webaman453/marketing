@@ -30,6 +30,7 @@ import {
   MonitorPlay,
   MousePointerClick,
   Plus,
+  RotateCw,
   Search,
   Settings2,
   ShoppingBag,
@@ -78,7 +79,7 @@ function Counter({ length, max, recommended }: { length: number; max?: number; r
 /** Set when a field's label just repeats its section title; the label is then kept for screen readers only. */
 export const SectionTitleContext = createContext<string | null>(null);
 
-function Shell({ field, errors, required, action, children, id }: { field: Field; errors: string[]; required?: boolean; action?: React.ReactNode; children: React.ReactNode; id: string }) {
+function Shell({ field, errors, required, action, note, children, id }: { field: Field; errors: string[]; required?: boolean; action?: React.ReactNode; /** Always shown under the input, even alongside errors. */ note?: React.ReactNode; children: React.ReactNode; id: string }) {
   const repeatsTitle = useContext(SectionTitleContext) === field.label && !action;
   return (
     <div className="grid gap-1.5">
@@ -90,6 +91,7 @@ function Shell({ field, errors, required, action, children, id }: { field: Field
         {action}
       </div>
       {children}
+      {note}
       {errors.length > 0 ? (
         <div className="space-y-0.5">
           {errors.map((e) => (
@@ -194,16 +196,7 @@ export function FieldRenderer(props: FieldProps) {
       );
     case "date":
     case "datetime":
-      return (
-        <Shell field={field} errors={p.errors} required={required} id={id}>
-          <div className="flex items-center gap-2">
-            <Input id={id} type={field.type === "date" ? "date" : "datetime-local"} value={String(value ?? "")} onChange={(e) => p.onChange(e.target.value || null)} className="h-9" />
-            {Boolean(value) && !required && (
-              <Button type="button" variant="ghost" size="icon-sm" onClick={() => p.onChange(null)} aria-label="Clear date"><X /></Button>
-            )}
-          </div>
-        </Shell>
-      );
+      return <DateInput {...(p as FieldProps<Extract<Field, { type: "date" | "datetime" }>>)} id={id} required={required} />;
     case "accountOption":
       return <AccountOptionInput {...(p as FieldProps<Extract<Field, { type: "accountOption" }>>)} id={id} required={required} />;
     case "ageRange": {
@@ -546,18 +539,36 @@ function MultiInput({ id, type, options, value, onChange, max, placeholder }: { 
 function AccountOptionInput({ field, value, onChange, errors, id, required }: FieldProps<Extract<Field, { type: "accountOption" }>> & { id: string; required: boolean }) {
   const env = useBuilderEnv();
   const options = env.options[field.source] ?? [];
+  const failed = !env.optionsLoading && !!env.optionsError;
+  const empty = !env.optionsLoading && !failed && options.length === 0;
+  const placeholder = env.optionsLoading ? "Loading…" : failed ? "Couldn't load from the ad account" : options.length ? "Choose…" : "None found in this ad account";
+  const note = failed ? (
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive sm:max-w-sm">
+      <span className="flex items-start gap-1.5">
+        <CircleAlert className="mt-px size-3.5 shrink-0" />
+        <span>Couldn&apos;t load {field.label.toLowerCase()} from the ad account. {env.optionsError}</span>
+      </span>
+      {env.retryOptions && (
+        <Button type="button" size="sm" variant="outline" className="h-7 bg-card text-foreground" onClick={env.retryOptions}>
+          <RotateCw /> Retry
+        </Button>
+      )}
+    </div>
+  ) : empty ? (
+    <p className="text-xs text-muted-foreground">This ad account has none yet. Create one in the platform&apos;s ads manager, then come back.</p>
+  ) : null;
   if (field.multiple) {
     return (
-      <Shell field={field} errors={errors} required={required} id={id}>
-        <MultiInput id={id} type="multiSelect" options={options.map((o) => ({ value: o.id, label: o.name, description: o.detail }))} value={(value as string[]) ?? []} onChange={onChange} placeholder={env.optionsLoading ? "Loading…" : options.length ? "Choose…" : "None found in this ad account"} />
+      <Shell field={field} errors={errors} required={required} id={id} note={note}>
+        <MultiInput id={id} type="multiSelect" options={options.map((o) => ({ value: o.id, label: o.name, description: o.detail }))} value={(value as string[]) ?? []} onChange={onChange} placeholder={placeholder} />
       </Shell>
     );
   }
   return (
-    <Shell field={field} errors={errors} required={required} id={id}>
+    <Shell field={field} errors={errors} required={required} id={id} note={note}>
       <Select value={String(value ?? "") || undefined} onValueChange={onChange}>
         <SelectTrigger id={id} className="h-9 w-full sm:max-w-sm">
-          <SelectValue placeholder={env.optionsLoading ? "Loading…" : options.length ? "Choose…" : "None found in this ad account"}>
+          <SelectValue placeholder={placeholder}>
             {options.find((o) => o.id === value)?.name}
           </SelectValue>
         </SelectTrigger>
@@ -572,6 +583,36 @@ function AccountOptionInput({ field, value, onChange, errors, id, required }: Fi
           ))}
         </SelectContent>
       </Select>
+    </Shell>
+  );
+}
+
+// ───────── Dates ─────────
+
+/** A date or date-time, labelled with the zone it's entered in (the platform schedules in the ad account's zone). */
+function DateInput({ field, value, onChange, errors, id, required }: FieldProps<Extract<Field, { type: "date" | "datetime" }>> & { id: string; required: boolean }) {
+  const { timeZone } = useBuilderEnv();
+  const noteId = `${id}-tz`;
+  const note = timeZone && (
+    <p id={noteId} className="text-xs text-muted-foreground">
+      {field.type === "date" ? "Dates" : "Times"} are in {timeZone.zone} ({timeZone.source === "account" ? "ad account" : "workspace"} time zone)
+    </p>
+  );
+  return (
+    <Shell field={field} errors={errors} required={required} id={id} note={note}>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          type={field.type === "date" ? "date" : "datetime-local"}
+          aria-describedby={timeZone ? noteId : undefined}
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value || null)}
+          className="h-9"
+        />
+        {Boolean(value) && !required && (
+          <Button type="button" variant="ghost" size="icon-sm" onClick={() => onChange(null)} aria-label="Clear date"><X /></Button>
+        )}
+      </div>
     </Shell>
   );
 }

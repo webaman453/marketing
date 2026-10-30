@@ -10,6 +10,7 @@ import {
   type ReportResult,
 } from "@ashniva/shared";
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
+import { FxNote } from "@/components/campaigns/fx-note";
 import { PlatformIcon } from "@/components/platform-icon";
 import { Card } from "@/components/ui/card";
 import { ChartContainer } from "@/components/ui/chart";
@@ -43,6 +44,7 @@ export function ReportView({ result, className }: { result: ReportResult; classN
           );
         })}
       </div>
+      <FxNote fx={result.fx} className="-mt-2" />
 
       {chart && result.series.length > 1 && (
         <Card className="gap-3 px-4 py-4">

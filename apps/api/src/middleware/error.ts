@@ -1,5 +1,5 @@
 import { isConnectorError } from "@ashniva/connectors";
-import { DraftInvalidError, EntitlementError } from "@ashniva/core";
+import { DraftAlreadyLaunchedError, DraftInvalidError, EntitlementError } from "@ashniva/core";
 import multer from "multer";
 import { Prisma } from "@ashniva/db";
 import type { ApiErrorBody } from "@ashniva/shared";
@@ -32,6 +32,10 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   }
   if (err instanceof DraftInvalidError) {
     res.status(422).json({ error: { code: "DRAFT_INVALID", message: err.message, issues: err.issues } } satisfies ApiErrorBody);
+    return;
+  }
+  if (err instanceof DraftAlreadyLaunchedError) {
+    res.status(409).json({ error: { code: "CONFLICT", message: err.message } } satisfies ApiErrorBody);
     return;
   }
   if (err instanceof multer.MulterError) {

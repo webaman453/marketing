@@ -7,9 +7,11 @@
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { unzipSync, strFromU8 } from "fflate";
-import { ConnectorError } from "../errors";
+import { ConnectorError, expiredGrant, isConnectorError, noRowsUnlessFatal, type ConnectorErrorCode } from "../errors";
 import { codeFromStatus, requestJson } from "../http";
+import { ianaTimeZone } from "./timezones";
 import type {
+  AccountBilling,
   AccountRef,
   AccountStructure,
   AdPlatformConnector,
@@ -76,6 +78,14 @@ function parseCsv(text: string): Row[] {
   return rows.map((l) => Object.fromEntries(split(l).map((v, i) => [cols[i], v])));
 }
 
+/** Fault error codes (https://learn.microsoft.com/advertising/guides/operation-error-codes). */
+const MS_FAULT_CODES: Record<number, ConnectorErrorCode> = {
+  105: "AUTH_EXPIRED", // InvalidCredentials
+  106: "PERMISSION_DENIED", // UserIsNotAuthorized
+  109: "AUTH_EXPIRED", // AuthenticationTokenExpired
+  117: "RATE_LIMITED", // CallRateExceeded
+};
+
 const num = (v: unknown) => Number(String(v ?? "0").replace(/,/g, "")) || 0;
 
 export class MicrosoftAdsConnector implements AdPlatformConnector {
@@ -87,11 +97,19 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
     return Boolean(this.config.clientId && this.config.clientSecret && this.config.developerToken);
   }
 
+  /**
+   * Bing Ads faults (AdApiFaultDetail.Errors[], ApiFaultDetail.OperationErrors[]) usually come back
+   * as HTTP 500/400; the fault's error Code says what happened, so it wins over the HTTP status
+   * (handle-service-errors-exceptions doc).
+   */
   private mapError = (status: number, body: unknown) => {
-    const b = body as { Errors?: { Message?: string }[]; error_description?: string; Message?: string };
+    type FaultError = { Code?: number | string; Message?: string };
+    const b = body as { Errors?: FaultError[]; OperationErrors?: FaultError[]; error_description?: string; Message?: string };
+    const errors = [...(b?.Errors ?? []), ...(b?.OperationErrors ?? [])];
+    const code = errors.map((e) => MS_FAULT_CODES[Number(e.Code)]).find(Boolean) ?? codeFromStatus(status);
     return new ConnectorError(
-      codeFromStatus(status),
-      b?.Errors?.[0]?.Message ?? b?.Message ?? b?.error_description ?? `Microsoft Advertising error (${status})`,
+      code,
+      errors[0]?.Message ?? b?.Message ?? b?.error_description ?? `Microsoft Advertising error (${status})`,
       body,
     );
   };
@@ -143,7 +161,8 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
   }
 
   refreshTokens(refreshToken: string) {
-    return this.token({ grant_type: "refresh_token", refresh_token: refreshToken });
+    // An expired or revoked refresh token is 400 invalid_grant: an expired login, not a bad request.
+    return this.token({ grant_type: "refresh_token", refresh_token: refreshToken }).catch(expiredGrant);
   }
 
   async getUser(auth: ConnectorAuth) {
@@ -159,13 +178,19 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
     });
     const out: ExternalAdAccount[] = [];
     for (const a of info.AccountsInfo ?? []) {
-      const detail = await this.api<{ Account?: Row }>(`${CUSTOMER_API}/Account/Query`, auth, { AccountId: a.Id }).catch(() => ({ Account: undefined }));
+      // An account whose details can't be read is still listed; an expired login, rate limit or
+      // outage fails the listing instead of saving the account with a guessed currency.
+      const detail = await this.api<{ Account?: Row }>(`${CUSTOMER_API}/Account/Query`, auth, { AccountId: a.Id }).catch((err) => {
+        if (isConnectorError(err) && (err.code === "INVALID_REQUEST" || err.code === "PERMISSION_DENIED")) return { Account: undefined };
+        throw err;
+      });
       const acc = detail.Account ?? {};
       out.push({
         externalId: String(a.Id),
         name: a.Name ?? acc.Name ?? `Microsoft Ads ${a.Id}`,
         currency: acc.CurrencyCode ?? "USD",
-        timezone: acc.TimeZone ?? null,
+        // AccountRef.timezone is IANA; createCampaign maps it back to Microsoft's value.
+        timezone: ianaTimeZone(acc.TimeZone),
         status: a.AccountLifeCycleStatus ?? "Active",
         meta: { customerId: acc.ParentCustomerId ?? null, number: a.Number },
       });
@@ -218,7 +243,7 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
           auth,
           { AdGroupId: g.Id, AdTypes: ["ResponsiveSearch", "ExpandedText", "ResponsiveAd"] },
           account,
-        ).catch(() => ({ Ads: [] as Row[] }));
+        ).catch((err) => ({ Ads: noRowsUnlessFatal<Row>(err) }));
         for (const ad of Ads) {
           structure.ads.push({
             externalId: `${g.Id}~${ad.Id}`,
@@ -274,8 +299,20 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
       const s = poll.ReportRequestStatus;
       if (s.Status === "Success") {
         if (!s.ReportDownloadUrl) return []; // no data in range
-        const res = await fetch(s.ReportDownloadUrl, { signal: AbortSignal.timeout(60_000) });
-        const files = unzipSync(new Uint8Array(await res.arrayBuffer()));
+        let res: Response;
+        try {
+          res = await fetch(s.ReportDownloadUrl, { signal: AbortSignal.timeout(60_000) });
+        } catch (err) {
+          throw new ConnectorError("PLATFORM_ERROR", "Couldn't download the Microsoft Advertising report.", String(err));
+        }
+        // An expired or failed download URL answers with an XML error, not a zip.
+        if (!res.ok) throw new ConnectorError("PLATFORM_ERROR", `Couldn't download the Microsoft Advertising report (${res.status}).`, await res.text().catch(() => null));
+        let files: Record<string, Uint8Array>;
+        try {
+          files = unzipSync(new Uint8Array(await res.arrayBuffer()));
+        } catch (err) {
+          throw new ConnectorError("PLATFORM_ERROR", "The Microsoft Advertising report download wasn't a valid zip.", String(err));
+        }
         const first = Object.values(files)[0];
         return first ? parseCsv(strFromU8(first)) : [];
       }
@@ -320,6 +357,16 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
     await this.updateCampaign(auth, account, { Id: Number(campaign.externalId), Status: status === "ACTIVE" ? "Active" : "Paused" });
   }
 
+  /**
+   * Payment state from the account's AccountFinancialStatus (Customer Management Account/Query).
+   * Microsoft has no account spending limit to read here; insertion orders are invoice-only.
+   * https://learn.microsoft.com/en-us/advertising/customer-management-service/accountfinancialstatus
+   */
+  async getBilling(auth: ConnectorAuth, account: AccountRef & { currency: string }): Promise<AccountBilling> {
+    const { Account: a = {} } = await this.api<{ Account?: Row }>(`${CUSTOMER_API}/Account/Query`, auth, { AccountId: Number(account.externalId) });
+    return { spendLimit: null, spentTowardLimit: null, balanceDue: null, fundsRemaining: null, ...microsoftBillingHealth(a.AccountFinancialStatus, a.AccountLifeCycleStatus) };
+  }
+
   async setCampaignDailyBudget(
     auth: ConnectorAuth,
     account: AccountRef,
@@ -360,4 +407,17 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
   ): Promise<AccountStructure> {
     return microsoftCreateCampaign(this.builderApi(auth, account), account, draft, assets);
   }
+}
+
+/** AccountFinancialStatus (and a suspended or paused lifecycle) as billing health. */
+export function microsoftBillingHealth(financial: string | undefined, lifecycle: string | undefined): Pick<AccountBilling, "health" | "note"> {
+  if (lifecycle === "Suspended") return { health: "blocked", note: "Microsoft suspended this account." };
+  if (lifecycle === "Inactive") return { health: "blocked", note: "This account is inactive." };
+  if (financial === "Hold" || financial === "SoldToOnlyOnHold" || financial === "SoldToAndBillToOnHold") {
+    return { health: "blocked", note: "Billing hold. Ads stop until the payment issue is fixed in Microsoft Advertising." };
+  }
+  if (financial === "CreditWarning" || financial === "Warning") return { health: "attention", note: "Microsoft flagged a payment problem." };
+  if (financial === "PendingCreditCheck" || financial === "ProposalsPendingCreditCheck") return { health: "attention", note: "Credit check pending." };
+  if (lifecycle === "Pause") return { health: "attention", note: "This account is paused." };
+  return financial === "ClearFinancialStatus" ? { health: "ok", note: null } : { health: "unknown", note: null };
 }

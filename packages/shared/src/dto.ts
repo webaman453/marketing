@@ -5,6 +5,7 @@ import type { AccountOptionKind, BuilderIssue, TargetingValue } from "./builder/
  * Dates are ISO strings; money values are numbers in the account currency.
  */
 import type { DraftResult } from "./builder";
+import type { FxInfo } from "./format";
 import type { MetricSet, MetricTotals } from "./metrics";
 import type { PlanId } from "./plans";
 import type { ReportConfig } from "./reports";
@@ -135,7 +136,10 @@ export interface CampaignRowDTO {
   adAccount: { id: string; name: string };
   startDate: string | null;
   endDate: string | null;
+  /** In `currency`, the ad account's own (what the platform bills). */
   metrics: MetricSet;
+  /** The same metrics in the workspace currency, when the account bills in another one and a rate is known. */
+  converted?: MetricSet;
 }
 
 export interface TimeseriesPoint extends MetricTotals {
@@ -160,16 +164,21 @@ export interface OverviewResponse {
   previous: MetricSet;
   timeseries: TimeseriesPoint[];
   byPlatform: PlatformBreakdown[];
+  /** Already in the workspace currency (`currency` on each row is the workspace's). */
   topCampaigns: CampaignRowDTO[];
   accounts: { total: number; connections: number; failing: number };
   lastSyncedAt: string | null;
+  /** How totals were converted into `currency`. */
+  fx?: FxInfo;
 }
 
 export interface CampaignListResponse {
   range: DateRange;
   currency: string;
   campaigns: CampaignRowDTO[];
+  /** In the workspace `currency`. */
   totals: MetricSet;
+  fx?: FxInfo;
 }
 
 export interface AdGroupRowDTO {
@@ -226,6 +235,7 @@ export interface CampaignDetailResponse {
   adGroups: AdGroupRowDTO[];
   ads: AdRowDTO[];
   activity: AuditLogDTO[];
+  fx?: FxInfo;
 }
 
 export interface AuditLogDTO {
@@ -391,6 +401,41 @@ export interface AdCopyResponse {
 
 // ───────────────────────── Leads ─────────────────────────
 
+/** Where the team is with a lead, in workflow order. */
+export const LEAD_STATUSES = ["NEW", "CONTACTED", "QUALIFIED", "WON", "LOST"] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
+export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = { NEW: "New", CONTACTED: "Contacted", QUALIFIED: "Qualified", WON: "Won", LOST: "Lost" };
+/** Longest note the team can keep on a lead. */
+export const LEAD_NOTE_MAX = 2000;
+
+/** How the leads list can be ordered. */
+export const LEAD_SORTS = ["newest", "oldest", "campaign", "cost"] as const;
+export type LeadSort = (typeof LEAD_SORTS)[number];
+
+/**
+ * Filters of GET /leads and /leads/export (besides from/to), as query string values.
+ * Every filter combines with the others (AND).
+ */
+export interface LeadQuery {
+  platform?: Platform;
+  /** "fb", "ig"…; "unknown" = no source */
+  source?: string;
+  campaignId?: string;
+  adGroupId?: string;
+  adId?: string;
+  formId?: string;
+  status?: LeadStatus;
+  /** "true" = has a phone number, "false" = has none */
+  hasPhone?: "true" | "false";
+  hasEmail?: "true" | "false";
+  /** Organic (no ad) or paid (from an ad) leads */
+  origin?: "paid" | "organic";
+  search?: string;
+  sort?: LeadSort;
+  page?: number;
+  pageSize?: number;
+}
+
 export interface LeadDTO {
   id: string;
   platform: Platform;
@@ -401,16 +446,38 @@ export interface LeadDTO {
   phone: string | null;
   campaignId: string | null;
   campaignName: string | null;
+  adGroupId: string | null;
   adGroupName: string | null;
   adId: string | null;
   adName: string | null;
+  formId: string | null;
   formName: string | null;
+  /** True for leads that came from a form without an ad (e.g. a Page's organic form). */
+  isOrganic: boolean;
   /** ISO timestamp the form was submitted */
   createdTime: string;
   /** That ad's spend on the day ÷ leads it got that day. An average, not billed per lead. */
   estCost: number | null;
   currency: string;
   fields: Record<string, string[]>;
+  status: LeadStatus;
+  note: string | null;
+  /** Last change to the status or note */
+  statusUpdatedAt: string | null;
+  statusUpdatedBy: { id: string; name: string } | null;
+}
+
+/** PATCH /leads/:leadId: set either or both; an empty note clears it. */
+export interface UpdateLeadInput {
+  status?: LeadStatus;
+  note?: string | null;
+}
+
+/** One choice of a lead filter (ad set, ad, form) with how many leads it has in the current filter. */
+export interface LeadFacet {
+  id: string;
+  name: string;
+  count: number;
 }
 
 export interface LeadsResponse {
@@ -424,7 +491,17 @@ export interface LeadsResponse {
     avgCost: number | null;
     totalCost: number | null;
     currency: string;
+    /** How ad spend was converted into `currency` for the cost estimates. */
+    fx?: FxInfo;
+    withPhone: number;
+    withEmail: number;
+    organic: number;
   };
+  /**
+   * Leads per status, in workflow order. Counted with every filter except the status one,
+   * so the status tabs keep their numbers while one is chosen.
+   */
+  byStatus: { status: LeadStatus; count: number }[];
   bySource: { source: string; count: number }[];
   /** How many leads each platform contributed in this response's filter. */
   byPlatform: { platform: Platform; count: number }[];
@@ -432,6 +509,10 @@ export interface LeadsResponse {
   byHour: number[];
   byDay: { date: string; count: number }[];
   byCampaign: { campaignId: string | null; name: string; count: number; cost: number | null }[];
+  /** Ad sets, ads and forms in the current filter, most leads first (top 50 each), for the filter menus. */
+  byAdGroup: LeadFacet[];
+  byAd: LeadFacet[];
+  byForm: LeadFacet[];
   /** Set when a connection could not read leads, e.g. it needs to be reconnected. */
   leadsError: string | null;
   timezone: string;

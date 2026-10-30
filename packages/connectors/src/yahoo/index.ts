@@ -4,7 +4,7 @@
  */
 import type { BuilderDraft, BuilderOptions, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { ConnectorError } from "../errors";
-import { requestJson, type RequestOptions } from "../http";
+import { allPages, requestJson, type RequestOptions } from "../http";
 import { apiError, authHeader, formToken, mapStatus } from "../oauth-flow";
 import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens } from "../types";
 import { yahooCreateCampaign, type YahooApi } from "./builder";
@@ -77,15 +77,31 @@ export class YahooDspConnector implements AdPlatformConnector {
     }));
   }
 
+  /**
+   * Traffic API lists page with `page` (1-based) and `limit` (max 100) and are filtered by their
+   * parent: campaigns by `accountId`, lines by `orderId` (the campaign), ads by `lineId`.
+   */
+  private listAll(path: string, auth: ConnectorAuth, filter: Record<string, string>) {
+    const limit = 100;
+    return allPages<Row, number>(1, async (page) => {
+      const res = await this.call<{ response?: Row[] }>(path, auth, { query: { ...filter, page, limit } });
+      const rows = res?.response ?? [];
+      return { items: rows, next: rows.length >= limit ? page + 1 : null };
+    }, `Yahoo DSP ${path.slice(1)} list`);
+  }
+
   async fetchStructure(auth: ConnectorAuth, account: AccountRef): Promise<AccountStructure> {
-    const q = { query: { advertiserId: account.externalId } };
-    const [campaigns, lines, ads] = await Promise.all([
-      this.call<{ response?: Row[] }>("/campaigns", auth, q).catch(() => ({ response: [] })),
-      this.call<{ response?: Row[] }>("/lines", auth, q).catch(() => ({ response: [] })),
-      this.call<{ response?: Row[] }>("/ads", auth, q).catch(() => ({ response: [] })),
-    ]);
+    const campaigns = await this.listAll("/campaigns", auth, { accountId: account.externalId });
+    const lines: Row[] = [];
+    for (const c of campaigns) {
+      for (const line of await this.listAll("/lines", auth, { orderId: String(c.id) })) lines.push({ ...line, orderId: line.orderId ?? c.id });
+    }
+    const ads: Row[] = [];
+    for (const line of lines) {
+      for (const ad of await this.listAll("/ads", auth, { lineId: String(line.id) })) ads.push({ ...ad, lineId: ad.lineId ?? line.id, campaignId: ad.campaignId ?? line.orderId });
+    }
     return {
-      campaigns: (campaigns.response ?? []).map((c) => ({
+      campaigns: campaigns.map((c) => ({
         externalId: String(c.id),
         name: c.name,
         status: mapStatus(c.status),
@@ -98,9 +114,10 @@ export class YahooDspConnector implements AdPlatformConnector {
         updatedAt: null,
         raw: {},
       })),
-      adGroups: (lines.response ?? []).map((g) => ({
+      adGroups: lines.map((g) => ({
         externalId: String(g.id),
-        campaignExternalId: String(g.campaignId),
+        // A line's parent campaign is its `orderId`.
+        campaignExternalId: String(g.orderId ?? g.campaignId),
         name: g.name,
         status: mapStatus(g.status),
         dailyBudget: g.budget ?? null,
@@ -108,7 +125,7 @@ export class YahooDspConnector implements AdPlatformConnector {
         targeting: null,
         raw: {},
       })),
-      ads: (ads.response ?? []).map((a) => ({
+      ads: ads.map((a) => ({
         externalId: String(a.id),
         adGroupExternalId: String(a.lineId),
         campaignExternalId: String(a.campaignId ?? ""),
@@ -136,7 +153,10 @@ export class YahooDspConnector implements AdPlatformConnector {
   }
 
   private api(auth: ConnectorAuth): YahooApi {
-    return { send: (path, body) => this.call(path, auth, { method: "POST", body }) };
+    return {
+      send: (path, body) => this.call(path, auth, { method: "POST", body }),
+      update: (path, body) => this.call(path, auth, { method: "PUT", body }),
+    };
   }
 
   getBuilderOptions(): Promise<BuilderOptions> {

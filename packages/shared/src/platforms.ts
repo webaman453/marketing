@@ -231,3 +231,79 @@ const HIDDEN_PLATFORMS = new Set<Platform>(["TIKTOK", "SWIGGY", "ZEPTO", "NAUKRI
 export const isPlatformShown = (platform: Platform) => !HIDDEN_PLATFORMS.has(platform);
 
 export const VISIBLE_PLATFORMS = PLATFORMS.filter(isPlatformShown);
+
+export interface ConnectCredentialField {
+  /** Key in the credentials object the connector reads, e.g. clientId */
+  key: string;
+  label: string;
+  secret?: boolean;
+  /** A pasted file, e.g. a PEM private key */
+  multiline?: boolean;
+  placeholder?: string;
+  help?: string;
+}
+
+export interface ConnectCredentialSpec {
+  /** Where the customer finds these keys, in one or two sentences. */
+  help: string;
+  docsUrl: string;
+  fields: ConnectCredentialField[];
+}
+
+/**
+ * Platforms without a user sign-in. Each customer organization connects them
+ * with its own API keys, stored encrypted on its connection, so a connection
+ * only sees the accounts those keys can reach. The operator's keys from the
+ * admin console are only a fallback for the operator's own organization.
+ */
+export const CONNECT_CREDENTIALS: Partial<Record<Platform, ConnectCredentialSpec>> = {
+  OUTBRAIN: {
+    help: "In Outbrain Amplify, open Settings → API and create an API token for your marketer.",
+    docsUrl: "https://developer.outbrain.com/home-page/amplify-api/",
+    fields: [{ key: "apiToken", label: "Amplify API token", secret: true }],
+  },
+  TRADEDESK: {
+    help: "Use a long-lived API token from The Trade Desk partner portal and the partner id it belongs to.",
+    docsUrl: "https://partner.thetradedesk.com/v3/portal/api/doc",
+    fields: [
+      { key: "apiToken", label: "API token", secret: true },
+      { key: "partnerId", label: "Partner ID" },
+    ],
+  },
+  CRITEO: {
+    help: "Create a Marketing Solutions app in Criteo developers, consent it for your advertisers, and copy its client credentials.",
+    docsUrl: "https://developers.criteo.com/marketing-solutions/docs",
+    fields: [
+      { key: "clientId", label: "Client ID" },
+      { key: "clientSecret", label: "Client secret", secret: true },
+    ],
+  },
+  APPLE: {
+    help: "In Apple Search Ads, open Account Settings → API, upload your public key for an API user, and copy the IDs Apple shows. The private key never leaves our server; we sign Apple's client secret with it.",
+    docsUrl: "https://developer.apple.com/documentation/apple_ads/implementing-oauth-for-the-apple-search-ads-api",
+    fields: [
+      { key: "clientId", label: "Client ID", placeholder: "SEARCHADS.…" },
+      { key: "teamId", label: "Team ID", placeholder: "SEARCHADS.…" },
+      { key: "keyId", label: "Key ID" },
+      {
+        key: "privateKey",
+        label: "Private key (PEM)",
+        secret: true,
+        multiline: true,
+        placeholder: "-----BEGIN EC PRIVATE KEY-----",
+        help: "The ES256 (P-256) private key whose public key you uploaded to Apple.",
+      },
+    ],
+  },
+  TABOOLA: {
+    help: "In Taboola Backstage, open API → Apps (or ask your account manager) for a client id and secret with campaign permissions.",
+    docsUrl: "https://developers.taboola.com/backstage-api/reference",
+    fields: [
+      { key: "clientId", label: "Client ID" },
+      { key: "clientSecret", label: "Client secret", secret: true },
+    ],
+  },
+};
+
+/** True when "Connect" asks for the customer's own API keys instead of a sign-in. */
+export const connectsWithCredentials = (platform: Platform) => platform in CONNECT_CREDENTIALS;

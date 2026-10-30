@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { applyServerErrors } from "@/lib/forms";
 import { CURRENCY_LABELS, TIMEZONES } from "@/lib/timezones";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type FormInput = z.input<typeof workspaceSchema>;
 
@@ -32,6 +33,7 @@ export function WorkspaceForm({
     defaultValues: { name: "", currency: "INR", timezone: "Asia/Kolkata", ...defaultValues },
   });
   const { errors, isSubmitting, isDirty } = form.formState;
+  useUnsavedChanges(isDirty && !isSubmitting && !disabled);
 
   const submit = form.handleSubmit(async (values) => {
     try {

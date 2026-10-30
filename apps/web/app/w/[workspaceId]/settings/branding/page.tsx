@@ -16,6 +16,7 @@ import { api, apiUpload } from "@/lib/api";
 import { useCatalog } from "@/lib/catalog";
 import { toastError } from "@/lib/forms";
 import { qk } from "@/lib/queries";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 export default function BrandingPage() {
   const { org, workspace, can } = useWorkspace();
@@ -30,6 +31,8 @@ export default function BrandingPage() {
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const dirty = name !== (b.brandName ?? "") || color !== (b.brandColor ?? "#3b5bdb") || footer !== (b.reportFooter ?? "");
+  useUnsavedChanges(dirty && !saving && can("org:update") && planHasFeature(org.plan, "white_label"));
 
   if (!can("org:update")) return <NoAccess what="branding" />;
   if (!planHasFeature(org.plan, "white_label")) {

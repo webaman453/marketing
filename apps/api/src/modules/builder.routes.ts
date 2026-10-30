@@ -1,4 +1,4 @@
-import { assertFeature, connectors, getAccessToken, inspectDraft, launchDraft } from "@ashniva/core";
+import { assertFeature, connectors, getConnectorAuth, inspectDraft, launchDraft } from "@ashniva/core";
 import { prisma, type CampaignDraft, type Prisma } from "@ashniva/db";
 import {
   COUNTRIES,
@@ -46,7 +46,7 @@ builderRouter.get("/builder/options", requirePermission("campaigns:edit"), async
     res.json({} satisfies BuilderOptions);
     return;
   }
-  res.json(await connector.getBuilderOptions({ accessToken: await getAccessToken(account.connection) }, ref));
+  res.json(await connector.getBuilderOptions(await getConnectorAuth(account.connection), ref));
 });
 
 /** Typeahead for locations, interests, job titles and similar. */
@@ -59,7 +59,7 @@ builderRouter.get("/builder/targeting", requirePermission("campaigns:edit"), asy
   const kind = q.kind as TargetingKind;
   let results: TargetingSearchResult[] = [];
   if (connector.searchTargeting) {
-    results = await connector.searchTargeting({ accessToken: await getAccessToken(account.connection) }, ref, kind, q.q);
+    results = await connector.searchTargeting(await getConnectorAuth(account.connection), ref, kind, q.q);
   }
   // Countries and languages always work, even before a platform search is available.
   if (results.length === 0 && kind === "location") {

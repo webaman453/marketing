@@ -6,11 +6,12 @@
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { ConnectorError } from "../errors";
-import { codeFromStatus, requestJson, ZERO_DECIMAL_CURRENCIES, type RequestOptions } from "../http";
+import { codeFromStatus, MAX_PAGES, requestJson, ZERO_DECIMAL_CURRENCIES, type RequestOptions } from "../http";
 import { metaFetchAdMedia } from "./media";
 import { metaFetchLeads } from "./leads";
 import { metaBuilderOptions, metaCreateCampaign, metaSearchTargeting, type MetaApi } from "./builder";
 import type {
+  AccountBilling,
   AccountRef,
   AccountStructure,
   AdPlatformConnector,
@@ -127,14 +128,20 @@ export class MetaConnector implements AdPlatformConnector {
     });
   }
 
-  /** Follows `paging.next` cursors until all pages are read. */
+  /**
+   * Follows `paging.next` cursors until all pages are read, capped at MAX_PAGES like allPages
+   * so a cursor that never ends fails the sync instead of reading forever.
+   */
   private async all<T>(path: string, auth: ConnectorAuth, query: Record<string, string | number>) {
     const out: T[] = [];
     let page = await this.call<Paged<T>>(path, { query: { ...query, access_token: auth.accessToken } });
-    out.push(...page.data);
-    while (page.paging?.next) {
+    out.push(...(page.data ?? []));
+    for (let n = 1; page.paging?.next; n++) {
+      if (n >= MAX_PAGES) {
+        throw new ConnectorError("PLATFORM_ERROR", `The Meta list ${path} has more than ${MAX_PAGES} pages; stopped so a partial list is not saved as the whole account.`);
+      }
       page = await this.call<Paged<T>>(page.paging.next);
-      out.push(...page.data);
+      out.push(...(page.data ?? []));
     }
     return out;
   }
@@ -359,6 +366,51 @@ export class MetaConnector implements AdPlatformConnector {
     });
   }
 
+  /**
+   * Spend cap, what is spent toward it and the unpaid balance. Graph returns these as
+   * strings in the currency's minor unit (paise, cents); a spend_cap of "0" means no cap.
+   * https://developers.facebook.com/docs/marketing-api/reference/ad-account/
+   */
+  async getBilling(auth: ConnectorAuth, account: AccountRef & { currency: string }): Promise<AccountBilling> {
+    const r = await this.call<{
+      spend_cap?: string;
+      amount_spent?: string;
+      balance?: string;
+      account_status?: number;
+      disable_reason?: number;
+      currency?: string;
+    }>(`/act_${account.externalId}`, {
+      query: { fields: "spend_cap,amount_spent,balance,account_status,disable_reason,currency", access_token: auth.accessToken },
+    });
+    const currency = r.currency || account.currency;
+    const money = (v?: string) => (v == null || v === "" ? null : fromMinor(Number(v), currency));
+    const cap = money(r.spend_cap);
+    const spendLimit = cap && cap > 0 ? cap : null;
+    const spent = money(r.amount_spent);
+    return {
+      spendLimit,
+      spentTowardLimit: spent,
+      balanceDue: money(r.balance),
+      fundsRemaining: null,
+      ...metaBillingHealth(r.account_status, spendLimit, spent),
+    };
+  }
+
+  /**
+   * Sets the account spend cap, or removes it (null). Unlike the read, the write takes the
+   * currency's basic unit (rupees, dollars); `spend_cap_action=delete` removes the cap.
+   */
+  async setSpendLimit(auth: ConnectorAuth, account: AccountRef & { currency: string }, amount: number | null) {
+    const body: Record<string, string> =
+      amount == null
+        ? { spend_cap_action: "delete", access_token: auth.accessToken }
+        : {
+            spend_cap: ZERO_DECIMAL_CURRENCIES.has(account.currency) ? String(Math.round(amount)) : amount.toFixed(2),
+            access_token: auth.accessToken,
+          };
+    await this.call(`/act_${account.externalId}`, { method: "POST", form: true, body });
+  }
+
   /** Graph API calls used by the campaign builder. */
   private api(auth: ConnectorAuth): MetaApi {
     const token = auth.accessToken;
@@ -396,6 +448,30 @@ export class MetaConnector implements AdPlatformConnector {
   createCampaign(auth: ConnectorAuth, account: AccountRef & { currency: string }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
     return metaCreateCampaign(this.api(auth), account, draft, assets);
   }
+}
+
+/** Billing health from account_status, and how close the account is to its spend cap. */
+export function metaBillingHealth(status: number | undefined, spendLimit: number | null, spent: number | null): Pick<AccountBilling, "health" | "note"> {
+  switch (status) {
+    case 3:
+    case 8:
+      return { health: "blocked", note: "Payment failed. Ads stop until the balance is paid." };
+    case 2:
+      return { health: "blocked", note: "This ad account is disabled." };
+    case 100:
+    case 101:
+      return { health: "blocked", note: "This ad account is closed." };
+    case 9:
+      return { health: "attention", note: "Payment overdue (grace period)." };
+    case 7:
+      return { health: "attention", note: "Meta is reviewing this account." };
+  }
+  if (spendLimit && spent != null) {
+    const used = spent / spendLimit;
+    if (used >= 1) return { health: "blocked", note: "Spending limit reached. Ads are paused until it's raised." };
+    if (used >= 0.9) return { health: "attention", note: `${Math.floor(used * 100)}% of the spending limit used.` };
+  }
+  return status === 1 ? { health: "ok", note: null } : { health: "unknown", note: null };
 }
 
 /** Meta expresses budgets in the currency's minor unit (paise, cents). */

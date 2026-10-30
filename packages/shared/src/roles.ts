@@ -18,7 +18,11 @@ export type Permission =
   | "integrations:manage"
   | "campaigns:edit"
   | "data:view"
-  | "audit:view";
+  | "audit:view"
+  /** Download leads (names, emails, phones) as CSV. */
+  | "leads:export"
+  /** Move leads through the follow-up workflow (status) and write notes on them. */
+  | "leads:manage";
 
 const PERMISSIONS: Record<Role, readonly Permission[]> = {
   OWNER: [
@@ -31,6 +35,8 @@ const PERMISSIONS: Record<Role, readonly Permission[]> = {
     "campaigns:edit",
     "data:view",
     "audit:view",
+    "leads:export",
+    "leads:manage",
   ],
   ADMIN: [
     "org:update",
@@ -40,8 +46,10 @@ const PERMISSIONS: Record<Role, readonly Permission[]> = {
     "campaigns:edit",
     "data:view",
     "audit:view",
+    "leads:export",
+    "leads:manage",
   ],
-  MANAGER: ["campaigns:edit", "data:view"],
+  MANAGER: ["campaigns:edit", "data:view", "leads:export", "leads:manage"],
   ANALYST: ["data:view"],
   CLIENT: ["data:view"],
 };

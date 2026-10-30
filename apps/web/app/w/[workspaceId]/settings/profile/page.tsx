@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { applyServerErrors } from "@/lib/forms";
 import { qk } from "@/lib/queries";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 export default function ProfilePage() {
   const { me } = useWorkspace();
@@ -25,6 +26,9 @@ export default function ProfilePage() {
     resolver: zodResolver(changePasswordSchema),
     defaultValues: { currentPassword: "", newPassword: "" },
   });
+  useUnsavedChanges(
+    (profile.formState.isDirty && !profile.formState.isSubmitting) || (password.formState.isDirty && !password.formState.isSubmitting),
+  );
 
   const saveProfile = profile.handleSubmit(async (values) => {
     try {

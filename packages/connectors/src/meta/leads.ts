@@ -2,11 +2,22 @@
  * Reads Instant Form leads. Leads belong to Facebook Pages, not ad accounts,
  * and are read with each Page's own token (derived from the login's token).
  */
+import { ConnectorError, isConnectorError } from "../errors";
 import type { ExternalLead } from "../types";
 
 type Rec = Record<string, any>;
 type All = (path: string, token: string, query: Record<string, string | number>) => Promise<Rec[]>;
 type One = (path: string, token: string, query: Record<string, string | number>) => Promise<Rec>;
+
+/**
+ * A Page or form this login cannot read (missing role, removed form) is skipped so it does not
+ * block the others; an expired login, rate limit or outage throws so the sync records it
+ * instead of silently skipping those leads.
+ */
+function skipUnlessFatal(err: unknown) {
+  if (isConnectorError(err) && (err.code === "PERMISSION_DENIED" || err.code === "INVALID_REQUEST" || err.code === "UNSUPPORTED")) return;
+  throw err;
+}
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : null);
 
@@ -14,8 +25,11 @@ export async function metaFetchLeads(all: All, one: One, userToken: string, sinc
   // Say so plainly when the login was connected before lead access was requested.
   const perms = await one("/me/permissions", userToken, {});
   const granted = new Set((perms.data as Rec[] | undefined)?.filter((p) => p.status === "granted").map((p) => String(p.permission)));
-  // Login no longer asks for this until the Meta app has the leads use case.
-  if (!granted.has("leads_retrieval")) return [];
+  // Login no longer asks for this until the Meta app has the leads use case. Throw rather than
+  // return [] so the sync records it in stats.leadsError and the app can show a reconnect banner.
+  if (!granted.has("leads_retrieval")) {
+    throw new ConnectorError("PERMISSION_DENIED", "Leads permission not granted. Reconnect Meta and allow lead access to read leads.");
+  }
 
   const pages = await all("/me/accounts", userToken, { fields: "id,name,access_token", limit: 100 });
   const out: ExternalLead[] = [];
@@ -29,7 +43,8 @@ export async function metaFetchLeads(all: All, one: One, userToken: string, sinc
     let forms: Rec[];
     try {
       forms = await all(`/${page.id}/leadgen_forms`, pageToken, { fields: "id,name,status", limit: 100 });
-    } catch {
+    } catch (err) {
+      skipUnlessFatal(err);
       continue; // a Page we cannot read must not block the others
     }
     for (const form of forms) {
@@ -40,7 +55,8 @@ export async function metaFetchLeads(all: All, one: One, userToken: string, sinc
           limit: 100,
           ...(filtering ? { filtering } : {}),
         });
-      } catch {
+      } catch (err) {
+        skipUnlessFatal(err);
         continue;
       }
       for (const l of leads) {

@@ -26,13 +26,33 @@ export function DateRangePicker({ className }: { className?: string }) {
   const { setPreset, setCustom } = useDateRangeStore();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DayRange | undefined>();
+  /** True after the first click of a new selection, until the end day is picked. */
+  const [picking, setPicking] = useState(false);
+
+  // Each pick starts fresh: the first click selects that one day, the second sets the other end.
+  // (react-day-picker's default would stretch or shrink the range that was already there.)
+  const onPick = (_range: DayRange | undefined, day: Date) => {
+    if (!picking || !draft?.from) {
+      setDraft({ from: day, to: day });
+      setPicking(true);
+      return;
+    }
+    const start = draft.from;
+    setDraft(day < start ? { from: day, to: start } : { from: start, to: day });
+    setPicking(false);
+  };
+  const from = draft?.from;
+  const to = draft?.to ?? draft?.from;
 
   return (
     <Popover
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (o) setDraft({ from: parseISO(range.from), to: parseISO(range.to) });
+        if (o) {
+          setDraft({ from: parseISO(range.from), to: parseISO(range.to) });
+          setPicking(false);
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -68,7 +88,7 @@ export function DateRangePicker({ className }: { className?: string }) {
               mode="range"
               numberOfMonths={2}
               selected={draft}
-              onSelect={setDraft}
+              onSelect={onPick}
               defaultMonth={draft?.from}
               disabled={{ after: new Date() }}
               className="hidden sm:block"
@@ -77,21 +97,28 @@ export function DateRangePicker({ className }: { className?: string }) {
               mode="range"
               numberOfMonths={1}
               selected={draft}
-              onSelect={setDraft}
+              onSelect={onPick}
               defaultMonth={draft?.from}
               disabled={{ after: new Date() }}
               className="sm:hidden"
             />
             <div className="flex items-center justify-between gap-3 border-t px-2 pt-2">
-              <span className="text-xs text-muted-foreground">
-                {draft?.from && draft.to ? describe(toISODate(toUTC(draft.from)), toISODate(toUTC(draft.to))) : "Select a start and end date"}
+              <span className="text-xs text-muted-foreground" aria-live="polite">
+                {from && to ? (
+                  <>
+                    <span className="font-medium text-foreground">{describe(toISODate(toUTC(from)), toISODate(toUTC(to)))}</span>
+                    {picking && " · pick an end date, or apply this day"}
+                  </>
+                ) : (
+                  "Select a start and end date"
+                )}
               </span>
               <Button
                 size="sm"
-                disabled={!draft?.from || !draft.to}
+                disabled={!from || !to}
                 onClick={() => {
-                  if (!draft?.from || !draft.to) return;
-                  setCustom({ from: toISODate(toUTC(draft.from)), to: toISODate(toUTC(draft.to)) });
+                  if (!from || !to) return;
+                  setCustom({ from: toISODate(toUTC(from)), to: toISODate(toUTC(to)) });
                   setOpen(false);
                 }}
               >

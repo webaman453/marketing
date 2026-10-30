@@ -267,7 +267,14 @@ export type PlacementPreview =
   | "bing_audience"
   | "snap_story"
   | "pinterest_grid"
-  | "pinterest_closeup";
+  | "pinterest_closeup"
+  | "x_feed"
+  | "app_store_search"
+  | "amazon_shopping"
+  | "spotify_audio"
+  | "native_feed"
+  | "display_banner"
+  | "video_instream";
 
 export interface PlatformBuilderSpec {
   platform: Platform;

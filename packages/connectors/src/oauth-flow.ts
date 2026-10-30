@@ -3,9 +3,10 @@
  * its own endpoints and campaign mapping.
  */
 import { createHash, createHmac } from "node:crypto";
+import { CONNECT_CREDENTIALS, PLATFORM_INFO, type Platform } from "@ashniva/shared";
 import { ConnectorError } from "./errors";
 import { codeFromStatus, requestJson } from "./http";
-import type { EntityStatus, OAuthTokens } from "./types";
+import type { EntityStatus, OAuthTokens, PlatformCredentials } from "./types";
 
 export const CLIENT_REFRESH = "client_credentials";
 
@@ -61,4 +62,15 @@ export function mapStatus(status: string | undefined, active = ["ACTIVE", "ENABL
 
 export function authHeader(token: string, extra: Record<string, string> = {}): Record<string, string> {
   return { Authorization: `Bearer ${token}`, ...extra };
+}
+
+/** A customer's own API keys for the platform, trimmed, with every field filled in; throws naming the first missing one. */
+export function requireCredentials(platform: Platform, credentials: PlatformCredentials): PlatformCredentials {
+  const out: PlatformCredentials = {};
+  for (const field of CONNECT_CREDENTIALS[platform]?.fields ?? []) {
+    const value = credentials[field.key]?.trim();
+    if (!value) throw new ConnectorError("INVALID_REQUEST", `Enter the ${PLATFORM_INFO[platform].name} ${field.label}.`);
+    out[field.key] = value;
+  }
+  return out;
 }

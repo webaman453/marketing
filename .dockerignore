@@ -11,4 +11,6 @@
 docs
 *.log
 .DS_Store
+._*
+**/._*
 packages/db/src/generated

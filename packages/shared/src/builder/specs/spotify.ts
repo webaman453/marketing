@@ -20,13 +20,18 @@ export const spotifySpec: PlatformBuilderSpec = {
     label: "Campaign",
     sections: [
       { id: "details", title: "Campaign", fields: [nameField("Campaign name", "Festive audio")] },
-      { id: "budget", title: "Budget", fields: budgetFields({}) },
+      {
+        id: "budget",
+        title: "Budget",
+        // The connector sends no schedule, so a lifetime budget would have no end date.
+        fields: budgetFields({ lifetime: false, help: "Daily budget for the campaign. It's split evenly across its ad sets." }),
+      },
       launchSection(),
     ],
   },
   adGroup: {
     label: "Ad set",
-    sections: [{ id: "where", title: "Ad set", fields: [nameField("Ad set name", "India · music"), locationsField()] }],
+    sections: [{ id: "where", title: "Ad set", fields: [nameField("Ad set name", "India · music"), locationsField({ allowExclude: false, help: "Countries to reach listeners in." })] }],
   },
   ad: () => ({
     label: "Ad",
@@ -61,5 +66,5 @@ export const spotifySpec: PlatformBuilderSpec = {
   }),
   maxAdGroups: 8,
   maxAds: 10,
-  previews: (ctx) => (ctx.ad.format === "DISPLAY" ? ["google_display"] : ["youtube_instream", "google_display"]),
+  previews: (ctx) => (ctx.ad.format === "DISPLAY" ? ["display_banner"] : ["spotify_audio"]),
 };

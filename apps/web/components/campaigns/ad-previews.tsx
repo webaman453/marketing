@@ -26,8 +26,6 @@ function defaultPlacements(platform: Platform, objective: string | null): Placem
       return ["google_search_mobile", "google_search_desktop"];
     case "MICROSOFT":
       return ["bing_search", "bing_audience"];
-    case "TIKTOK":
-      return ["tiktok_feed"];
     case "LINKEDIN":
       return ["linkedin_feed"];
     case "SNAPCHAT":
@@ -35,27 +33,25 @@ function defaultPlacements(platform: Platform, objective: string | null): Placem
     case "PINTEREST":
       return ["pinterest_grid", "pinterest_closeup"];
     case "AMAZON":
-      return o.includes("BRAND") || o.includes("DISPLAY") ? ["google_display", "google_shopping"] : ["google_search_mobile", "google_shopping"];
+      return o.includes("BRAND") || o.includes("DISPLAY") ? ["amazon_shopping", "display_banner"] : ["amazon_shopping"];
     case "X":
-      return ["linkedin_feed", "tiktok_feed"];
+      return ["x_feed"];
     case "APPLE":
-      return ["google_search_mobile"];
+      return ["app_store_search"];
     case "SPOTIFY":
-      return o.includes("DISPLAY") ? ["google_display"] : ["youtube_instream", "google_display"];
-    case "CRITEO":
-      return ["google_display", "google_display_native"];
+      return o.includes("VIDEO") ? ["video_instream", "spotify_audio"] : ["spotify_audio"];
     case "TABOOLA":
     case "OUTBRAIN":
-      return ["google_display_native", "discover"];
-    case "TRADEDESK":
     case "YAHOO":
-      return o.includes("VIDEO") ? ["youtube_instream"] : o.includes("NATIVE") ? ["google_display_native"] : ["google_display"];
+      return o.includes("VIDEO") ? ["video_instream", "native_feed"] : ["native_feed"];
+    case "CRITEO":
+    case "TRADEDESK":
+      return o.includes("VIDEO") ? ["video_instream", "display_banner"] : ["display_banner"];
     case "SHOPIFY":
-    case "SWIGGY":
-    case "ZEPTO":
       return ["google_display"];
-    case "NAUKRI":
-      return ["linkedin_feed"];
+    default:
+      // Hidden platforms (TikTok, Swiggy, Zepto, Naukri) are not offered in the app.
+      return ["google_display"];
   }
 }
 

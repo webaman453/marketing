@@ -9,13 +9,17 @@ import {
   type UserDTO,
   type WorkspaceDTO,
 } from "@ashniva/shared";
+import { unauthorized } from "./errors";
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
-/** Platform operators: flagged in the database or listed in SUPER_ADMIN_EMAILS. */
-export function isSuperAdmin(u: Pick<User, "email" | "isSuperAdmin">) {
+/**
+ * Platform operators: flagged in the database, or listed in SUPER_ADMIN_EMAILS once they've
+ * verified that address (otherwise whoever signed up first with it would be an admin).
+ */
+export function isSuperAdmin(u: Pick<User, "email" | "isSuperAdmin" | "emailVerifiedAt">) {
   const list = (process.env.SUPER_ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return u.isSuperAdmin || list.includes(u.email.toLowerCase());
+  return u.isSuperAdmin || (Boolean(u.emailVerifiedAt) && list.includes(u.email.toLowerCase()));
 }
 
 export const toUserDTO = (u: User): UserDTO => ({
@@ -83,14 +87,11 @@ export async function loadOrgsForUser(userId: string): Promise<OrgDTO[]> {
 }
 
 export async function buildMe(userId: string): Promise<MeResponse> {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
-  // A platform operator's own organizations are never on a customer trial.
-  if (isSuperAdmin(user)) {
-    await prisma.organization.updateMany({
-      where: { plan: "TRIAL", memberships: { some: { userId: user.id, role: "OWNER" } } },
-      data: { plan: "AGENCY", subscriptionStatus: "ACTIVE", trialEndsAt: null },
-    });
-  }
+  // Read-only: an operator's own org gets complimentary access when it's created (createOwnedOrg),
+  // not silently on every page load (which also upgraded orgs handed to them later).
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  // A user deleted mid-session: the caller must sign in again, not see a server error.
+  if (!user) throw unauthorized();
   return { user: toUserDTO(user), orgs: await loadOrgsForUser(userId) };
 }
 

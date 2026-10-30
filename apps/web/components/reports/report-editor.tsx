@@ -21,6 +21,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ErrorState } from "@/components/app/states";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useWorkspace } from "@/components/app/workspace-context";
 import { FormField } from "@/components/form-field";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -37,6 +47,7 @@ import { api } from "@/lib/api";
 import { dateTime } from "@/lib/format";
 import { toastError } from "@/lib/forms";
 import { qk2, useWorkspaceAdAccounts } from "@/lib/queries";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { cn } from "@/lib/utils";
 import { ScheduleDialog, ShareDialog } from "./report-dialogs";
 import { ReportView } from "./report-view";
@@ -72,6 +83,8 @@ export function ReportEditor({ report: initial }: { report: ReportDTO | null }) 
   const [saving, setSaving] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const debounced = useDebounced(config, 350);
 
   const preview = useQuery({
@@ -82,6 +95,9 @@ export function ReportEditor({ report: initial }: { report: ReportDTO | null }) 
 
   const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))].filter(isPlatformShown), [accounts.data]);
   const dirty = !report || report.name !== name || JSON.stringify(report.config) !== JSON.stringify(config);
+  // A new report only needs a warning once something was actually changed.
+  const edited = report ? dirty : name !== "Untitled report" || JSON.stringify(config) !== JSON.stringify(DEFAULT_CONFIG);
+  useUnsavedChanges(!isClient && edited && !deleting);
 
   async function save() {
     setSaving(true);
@@ -103,12 +119,15 @@ export function ReportEditor({ report: initial }: { report: ReportDTO | null }) 
 
   async function remove() {
     if (!report) return;
+    setDeleting(true);
     try {
       await api(`/workspaces/${workspace.id}/reports/${report.id}`, { method: "DELETE" });
       toast.success("Report deleted");
+      setConfirmDelete(false);
       void queryClient.invalidateQueries({ queryKey: qk2.reports(workspace.id) });
       router.push(`/w/${workspace.id}/reports`);
     } catch (err) {
+      setDeleting(false);
       toastError(err);
     }
   }
@@ -252,7 +271,7 @@ export function ReportEditor({ report: initial }: { report: ReportDTO | null }) 
               <Switch checked={config.compare} onCheckedChange={(v) => setConfig((c) => ({ ...c, compare: v }))} />
             </label>
             {report && (
-              <Button variant="ghost" size="sm" className="justify-start text-destructive hover:text-destructive" onClick={remove}>
+              <Button variant="ghost" size="sm" className="justify-start text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
                 <Trash2 /> Delete report
               </Button>
             )}
@@ -284,6 +303,30 @@ export function ReportEditor({ report: initial }: { report: ReportDTO | null }) 
         <>
           <ScheduleDialog key={`s-${scheduleOpen}`} report={report} workspaceId={workspace.id} timezone={workspace.timezone} open={scheduleOpen} onOpenChange={setScheduleOpen} onSaved={setReport} />
           <ShareDialog report={report} workspaceId={workspace.id} open={shareOpen} onOpenChange={setShareOpen} onSaved={setReport} />
+          <AlertDialog open={confirmDelete} onOpenChange={(o) => !deleting && setConfirmDelete(o)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete “{report.name}”?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Its email schedule and shared link stop working too. This can’t be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-white hover:bg-destructive/90"
+                  disabled={deleting}
+                  onClick={(e) => {
+                    // Keep the dialog open until the delete finishes.
+                    e.preventDefault();
+                    void remove();
+                  }}
+                >
+                  {deleting && <Loader2 className="animate-spin" />} Delete report
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       )}
     </div>

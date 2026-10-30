@@ -6,9 +6,10 @@ import { META_PLACEMENT_GROUPS, type AdNode, type BuilderDraft, type BuilderOpti
 import {
   bool,
   budgetOf,
-  dateOf,
+  builderZone,
   excluded,
   included,
+  instantOf,
   mediaOf,
   num,
   placements,
@@ -407,11 +408,13 @@ async function creativeSpec(api: MetaApi, act: string, draft: BuilderDraft, grou
 
 export async function metaCreateCampaign(
   api: MetaApi,
-  account: { externalId: string; currency: string },
+  account: { externalId: string; currency: string; timezone?: string | null },
   draft: BuilderDraft,
   assets: Map<string, BuilderAsset>,
 ): Promise<AccountStructure> {
   const act = `/act_${account.externalId}`;
+  // Start/end are wall-clock times in the ad account's zone.
+  const tz = builderZone(account);
   const c = draft.campaign;
   const cur = account.currency;
   const status = c.launchStatus === "ACTIVE" ? "ACTIVE" : "PAUSED";
@@ -469,8 +472,8 @@ export async function metaCreateCampaign(
       if (!cbo && !budget) throw new ConnectorError("INVALID_REQUEST", `Enter a budget for ad set “${str(v, "name")}”.`);
       const bidStrategy = cbo ? str(c, "bidStrategy") : str(v, "bidStrategy");
       const bidSource = cbo ? c : v;
-      const start = dateOf(v, "startDate");
-      const end = dateOf(v, "endDate");
+      const start = instantOf(v, "startDate", tz);
+      const end = instantOf(v, "endDate", tz, "end");
       const targeting = await targetingSpec(api, draft, v);
 
       const body: Record<string, unknown> = {

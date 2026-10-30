@@ -21,6 +21,14 @@ export interface BuilderEnv {
   currency: string;
   options: BuilderOptions;
   optionsLoading: boolean;
+  /** Why the ad account's options (pages, pixels, audiences…) couldn't be loaded, if they couldn't. */
+  optionsError?: string | null;
+  retryOptions?: () => void;
+  /**
+   * The zone date and time fields are entered in: the ad account's own, or the workspace's
+   * when the account doesn't report one.
+   */
+  timeZone?: { zone: string; source: "account" | "workspace" };
   creatives: CreativeDTO[];
   ai: AiStatusDTO | undefined;
   brief: BriefState;

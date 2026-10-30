@@ -109,6 +109,12 @@ function Editor({
   const creatives = useCreatives(workspace.id);
   const accounts = useWorkspaceAdAccounts(workspace.id);
   const account = accounts.data?.find((a) => a.id === initialDraft.adAccountId);
+  // Schedules are interpreted in the ad account's zone; fall back to the workspace's when the
+  // account doesn't report one.
+  const accountZone = account?.timezone;
+  const timeZone = accountZone
+    ? { zone: accountZone, source: "account" as const }
+    : { zone: workspace.timezone, source: "workspace" as const };
   const aiStatus = useAiStatus(workspace.id);
 
   const [draft, setDraft] = useState<BuilderDraft>(() => {
@@ -209,6 +215,13 @@ function Editor({
 
   // ── Autosave ──
   const dirty = useRef(false);
+  const mounted = useRef(true);
+  /** The id once created, readable by a save that started before the POST came back. */
+  const draftIdRef = useRef(draftId);
+  /** The save in progress, so a final flush waits for it instead of creating a second draft. */
+  const inFlight = useRef<Promise<unknown> | null>(null);
+  /** True while edits wait for the debounce timer. */
+  const pending = useRef(false);
   const update = useCallback((fn: (d: BuilderDraft) => BuilderDraft) => {
     dirty.current = true;
     setDraft(fn);
@@ -219,45 +232,88 @@ function Editor({
         name: String(d.campaign.name || "Untitled campaign"),
         payload: d,
       };
-      if (draftId) {
-        await api(`/workspaces/${workspace.id}/drafts/${draftId}`, {
+      const id = draftIdRef.current;
+      if (id) {
+        await api(`/workspaces/${workspace.id}/drafts/${id}`, {
           method: "PATCH",
           body,
         });
-        return draftId;
+        return id;
       }
       const created = await api<DraftDTO>(
         `/workspaces/${workspace.id}/drafts`,
         { method: "POST", body },
       );
+      draftIdRef.current = created.id;
+      // After leaving the page the URL belongs to wherever the person went.
+      if (!mounted.current) return created.id;
       setDraftId(created.id);
       // Native history keeps the page (and its title) as is; Next's router stays in sync with it.
+      // Keep the other params (?platform= and setup presets) so nothing that reads them re-renders away.
+      const query = new URLSearchParams(window.location.search);
+      query.set("draft", created.id);
       window.history.replaceState(
         null,
         "",
-        `/w/${workspace.id}/campaigns/new?draft=${created.id}`,
+        `/w/${workspace.id}/campaigns/new?${query.toString()}`,
       );
       return created.id;
     },
-    [draftId, workspace.id],
+    [workspace.id],
+  );
+  /** Saves after any save already running, so edits are never written out of order. */
+  const queueSave = useCallback(
+    (d: BuilderDraft) => {
+      const run = (inFlight.current ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => save(d));
+      inFlight.current = run;
+      return run.finally(() => {
+        if (inFlight.current === run) inFlight.current = null;
+      });
+    },
+    [save],
   );
   useEffect(() => {
     if (!dirty.current && draftId) return;
+    pending.current = true;
     const t = setTimeout(async () => {
+      pending.current = false;
+      // Cleared before the request, so edits made while it runs still count as unsaved.
+      dirty.current = false;
       setSaving("saving");
       try {
-        await save(effective);
-        dirty.current = false;
+        await queueSave(effective);
         setSaving("saved");
         void queryClient.invalidateQueries({
           queryKey: qk2.drafts(workspace.id),
         });
       } catch {
+        dirty.current = true;
         setSaving("error");
       }
     }, 900);
     return () => clearTimeout(t);
-  }, [effective, draftId, save, queryClient, workspace.id]);
+  }, [effective, draftId, queueSave, queryClient, workspace.id]);
+  // Leaving the builder (a link, the back button, a route change) flushes edits still waiting for
+  // the timer instead of dropping them.
+  const latest = useRef({ effective, queueSave });
+  useEffect(() => {
+    latest.current = { effective, queueSave };
+  });
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (!pending.current || !dirty.current) return;
+      pending.current = false;
+      dirty.current = false;
+      latest.current
+        .queueSave(latest.current.effective)
+        .then(() => queryClient.invalidateQueries({ queryKey: qk2.drafts(workspace.id) }))
+        .catch(() => toast.error("Your last changes to the campaign draft couldn't be saved."));
+    };
+  }, [queryClient, workspace.id]);
 
   // ── Node helpers ──
   const group =
@@ -406,6 +462,10 @@ function Editor({
     currency: account?.currency ?? workspace.currency,
     options: opts,
     optionsLoading: options.isLoading,
+    // Only a failure with nothing cached is an error; a failed background refetch keeps the old list.
+    optionsError: options.isError && !options.data ? options.error.message : null,
+    retryOptions: () => void options.refetch(),
+    timeZone,
     creatives: creatives.data ?? [],
     ai,
     brief,

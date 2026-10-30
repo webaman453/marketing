@@ -65,8 +65,16 @@ export async function startSession(req: Request, res: Response, userId: string) 
 }
 
 /**
+ * A rotated refresh token is retired with its expiry set to the moment it was
+ * revoked; a session ended by signing out (logout, password change or reset)
+ * keeps its original expiry. Only the former is a sign of token theft.
+ */
+const wasRotated = (s: { revokedAt: Date | null; expiresAt: Date }) => s.revokedAt != null && s.expiresAt.getTime() === s.revokedAt.getTime();
+
+/**
  * Rotates the refresh token. Presenting an already-rotated token signals
- * theft, so every session of that user is revoked.
+ * theft, so every session of that user is revoked. A token whose session was
+ * simply signed out is refused without touching the user's other sessions.
  */
 export async function rotateSession(req: Request, res: Response) {
   const presented = req.cookies?.[REFRESH_COOKIE] as string | undefined;
@@ -74,6 +82,10 @@ export async function rotateSession(req: Request, res: Response) {
 
   const session = await prisma.session.findUnique({ where: { tokenHash: sha256(presented) } });
   if (!session) throw unauthorized();
+  if (session.revokedAt && !wasRotated(session)) {
+    clearSessionCookies(res);
+    throw unauthorized("You were signed out. Please sign in again.");
+  }
   if (session.revokedAt) {
     await prisma.session.updateMany({ where: { userId: session.userId, revokedAt: null }, data: { revokedAt: new Date() } });
     clearSessionCookies(res);
@@ -83,7 +95,8 @@ export async function rotateSession(req: Request, res: Response) {
 
   const refresh = randomToken(48);
   const next = await prisma.$transaction(async (tx) => {
-    await tx.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+    const now = new Date();
+    await tx.session.update({ where: { id: session.id }, data: { revokedAt: now, expiresAt: now } });
     return tx.session.create({
       data: {
         userId: session.userId,

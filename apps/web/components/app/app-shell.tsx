@@ -15,6 +15,7 @@ import { AppSidebar } from "./app-sidebar";
 import { CommandMenu } from "./command-menu";
 import { NotificationsBell } from "./notifications-bell";
 import { EmptyState, ErrorState } from "./states";
+import { VerifyEmailBanner } from "./verify-email-banner";
 import { LAST_WORKSPACE_KEY, WorkspaceProvider } from "./workspace-context";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -78,6 +79,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <NotificationsBell />
             </div>
           </header>
+          {!me.data.user.emailVerified && <VerifyEmailBanner email={me.data.user.email} />}
           {org.locked && (
             <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-warning/30 bg-warning/10 px-4 py-2 text-center text-sm">
               <span className="font-medium">

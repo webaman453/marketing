@@ -4,7 +4,7 @@
  */
 import { TIKTOK_BILLING, type BuilderDraft, type BuilderOptions, type TargetingKind, type TargetingSearchResult, type Values } from "@ashniva/shared";
 import { createHash } from "node:crypto";
-import { bool, budgetOf, dateOf, excluded, included, mediaOf, num, placements, str, strs, withParams } from "../builder-values";
+import { bool, budgetOf, builderZone, excluded, included, instantOf, mediaOf, num, placements, str, strs, withParams } from "../builder-values";
 import { ConnectorError } from "../errors";
 import type { AccountStructure, BuilderAsset } from "../types";
 
@@ -140,8 +140,10 @@ async function uploadVideo(api: TikTokApi, advertiserId: string, asset: BuilderA
   throw new ConnectorError("PLATFORM_ERROR", "TikTok is still processing a video. Try publishing again in a minute.");
 }
 
-export async function tiktokCreateCampaign(api: TikTokApi, account: { externalId: string; currency: string }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
+export async function tiktokCreateCampaign(api: TikTokApi, account: { externalId: string; currency: string; timezone?: string | null }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
   const adv = account.externalId;
+  // The schedule is entered as wall-clock time in the ad account's zone; utc() converts for the API.
+  const tz = builderZone(account);
   const c = draft.campaign;
   const enable = c.launchStatus === "ACTIVE";
   const cbo = bool(c, "cbo");
@@ -189,8 +191,8 @@ export async function tiktokCreateCampaign(api: TikTokApi, account: { externalId
       if (!cbo && !budget) throw new ConnectorError("INVALID_REQUEST", `Enter a budget for ad group “${str(v, "name")}”.`);
       const p = placements(v, "placements");
       const scheduled = v.scheduleType === "SCHEDULE_START_END";
-      const start = (scheduled && dateOf(v, "startDate")) || new Date(Date.now() + 5 * 60_000);
-      const end = scheduled ? dateOf(v, "endDate") : null;
+      const start = (scheduled && instantOf(v, "startDate", tz)) || new Date(Date.now() + 5 * 60_000);
+      const end = scheduled ? instantOf(v, "endDate", tz, "end") : null;
       const custom = v.bidStrategy === "BID_TYPE_CUSTOM";
       const billing = TIKTOK_BILLING[goal] ?? "OCPM";
 

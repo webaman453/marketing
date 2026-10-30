@@ -13,3 +13,4 @@ export * from "./format";
 export * from "./ai";
 export * from "./platform-settings";
 export * from "./notifications";
+export * from "./spend";

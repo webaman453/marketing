@@ -1,24 +1,26 @@
 "use client";
 
 import { PLATFORMS, PLATFORM_INFO, VISIBLE_PLATFORMS, isPlatform, isPlatformShown, type Platform } from "@ashniva/shared";
-import { ArrowLeft } from "lucide-react";
+import { CreditCard, Lock } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { PageHeader } from "@/components/app/page-header";
+import { EmptyState } from "@/components/app/states";
 import { useWorkspace } from "@/components/app/workspace-context";
-import { CampaignBuilder } from "@/components/builder/campaign-builder";
 import { PlatformIcon } from "@/components/platform-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkspaceAdAccounts } from "@/lib/queries";
-import { cn } from "@/lib/utils";
 
 const GROUPS: { label: string; ids: Platform[] }[] = [
   { label: "Social", ids: ["META", "SNAPCHAT", "X", "LINKEDIN", "PINTEREST"] },
   { label: "Search and shopping", ids: ["GOOGLE", "MICROSOFT", "AMAZON", "APPLE"] },
   { label: "Native", ids: ["TABOOLA", "OUTBRAIN"] },
   { label: "Audio and programmatic", ids: ["SPOTIFY", "CRITEO", "YAHOO", "TRADEDESK"] },
-  { label: "Stores and hiring", ids: ["SHOPIFY"] },
+  { label: "Stores", ids: ["SHOPIFY"] },
 ];
 
 export default function AdFormatsPage() {
@@ -30,9 +32,47 @@ export default function AdFormatsPage() {
 }
 
 function AdFormats() {
+  const { workspace, org, can } = useWorkspace();
+  const router = useRouter();
   const params = useSearchParams();
   const requested = params.get("platform");
-  if (isPlatform(requested) && isPlatformShown(requested)) return <PlatformForm platform={requested} />;
+  const target = isPlatform(requested) && isPlatformShown(requested) ? requested : null;
+
+  // The form itself lives on Create campaign, where autosave keeps its own URL (?draft=) working on reload.
+  useEffect(() => {
+    if (target && can("campaigns:edit") && !org.locked) router.replace(`/w/${workspace.id}/campaigns/new?platform=${target}`);
+  }, [target, can, org.locked, router, workspace.id]);
+
+  if (!can("campaigns:edit")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title="Ad formats" />
+        <Card>
+          <EmptyState icon={Lock} title="You can't create ads in this organization" description="Your role can view data but not change campaigns. Ask an owner or admin for the Manager role." />
+        </Card>
+      </div>
+    );
+  }
+  if (org.locked) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title="Ad formats" />
+        <Card>
+          <EmptyState
+            icon={CreditCard}
+            title="Choose a plan to create ads"
+            description="This organization is read-only until a plan is active. Pick a plan and every platform's form opens here."
+            action={
+              <Button asChild>
+                <Link href={`/w/${workspace.id}/settings/billing`}>Choose a plan</Link>
+              </Button>
+            }
+          />
+        </Card>
+      </div>
+    );
+  }
+  if (target) return <Skeleton className="h-[480px] rounded-xl" />;
   return <PlatformGallery />;
 }
 
@@ -60,12 +100,12 @@ function PlatformGallery() {
                 <button
                   key={platform}
                   type="button"
-                  onClick={() => router.push(`/w/${workspace.id}/formats?platform=${platform}`)}
+                  onClick={() => router.push(`/w/${workspace.id}/campaigns/new?platform=${platform}`)}
                   className="flex h-full flex-col rounded-xl border bg-card p-5 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <PlatformIcon platform={platform} size="lg" />
-                    <Badge variant={connected ? "secondary" : "outline"}>{connected ? `${counts[platform]} connected` : "Not connected"}</Badge>
+                    <Badge variant={connected ? "secondary" : "outline"}>{connected ? `${counts[platform]} ${counts[platform] === 1 ? "account" : "accounts"}` : "Not connected"}</Badge>
                   </div>
                   <div className="mt-4 text-base font-semibold tracking-tight">{info.name}</div>
                   <p className="mt-1 line-clamp-2 flex-1 text-sm leading-relaxed text-muted-foreground">{info.description}</p>
@@ -80,32 +120,6 @@ function PlatformGallery() {
           </div>
         </section>
       ))}
-    </div>
-  );
-}
-
-function PlatformForm({ platform }: { platform: Platform }) {
-  const { workspace } = useWorkspace();
-  const router = useRouter();
-  const info = PLATFORM_INFO[platform];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0 space-y-3">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit" onClick={() => router.push(`/w/${workspace.id}/formats`)}>
-            <ArrowLeft /> All platforms
-          </Button>
-          <div className="flex items-center gap-3">
-            <PlatformIcon platform={platform} size="lg" />
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight sm:text-[22px]">{info.name}</h1>
-              <p className={cn("text-sm text-muted-foreground")}>{info.description}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-      <CampaignBuilder key={platform} initial={null} preset={{ platform, setup: {} }} />
     </div>
   );
 }

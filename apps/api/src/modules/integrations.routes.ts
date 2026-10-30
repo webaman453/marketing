@@ -4,17 +4,24 @@ import {
   audit,
   connectors,
   createSampleConnections,
+  decryptSecret,
+  encryptConnectionCredentials,
   encryptSecret,
   enqueueSync,
+  isOrgLocked,
   refreshAdAccounts,
   removeSampleConnections,
 } from "@ashniva/core";
+import { isConnectorError, type ExternalUser, type OAuthTokens, type PlatformCredentials } from "@ashniva/connectors";
 import { prisma, type AdAccount, type PlatformConnection, type Prisma } from "@ashniva/db";
 import {
+  CONNECT_CREDENTIALS,
   PLATFORM_INFO,
   PLATFORMS,
+  connectsWithCredentials,
   isPlatformShown,
   assignAdAccountSchema,
+  can,
   hasAllWorkspaceAccess,
   platformParam,
   type AdAccountDTO,
@@ -24,13 +31,17 @@ import {
 import { Router, type Request, type Response } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
-import { config, oauthRedirectUri } from "../config";
-import { badRequest, notFound, parse } from "../lib/errors";
+import { config, isProd, oauthRedirectUri } from "../config";
+import { badRequest, forbidden, notFound, parse } from "../lib/errors";
+import { isSuperAdmin } from "../lib/serialize";
 import { logger } from "../lib/logger";
 import { ACCESS_COOKIE, rotateSession, verifyAccess } from "../lib/session";
 import { requirePermission } from "../middleware/auth";
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
+
+/** Holds an OAuth 1.0a (X) sign-in between authorize and the callback. */
+const OAUTH1_COOKIE = "ashniva_oauth1";
 
 const toConnectionDTO = (
   c: PlatformConnection & { _count: { adAccounts: number }; createdBy: { name: string } | null },
@@ -79,16 +90,25 @@ async function visibleAccountFilter(req: Request): Promise<Prisma.AdAccountWhere
   return { orgId: req.org!.id, workspaceId: { in: access.map((a) => a.workspaceId) } };
 }
 
-/** Platform catalogue with availability and whether our app credentials are set. */
+/**
+ * Platform catalogue with availability and whether it can be connected. Key-based
+ * platforms always can (each organization brings its own keys); `operatorKeys`
+ * says the operator's own keys are also set, for the operator's own organization.
+ */
 integrationsRouter.get("/platforms", (_req, res) => {
   const registry = connectors();
   const live = new Set(registry.livePlatforms());
   res.json(
-    PLATFORMS.filter(isPlatformShown).map((p) => ({
-      ...PLATFORM_INFO[p],
-      supported: live.has(p),
-      configured: registry.isConfigured(p),
-    })),
+    PLATFORMS.filter(isPlatformShown).map((p) => {
+      const withKeys = connectsWithCredentials(p);
+      return {
+        ...PLATFORM_INFO[p],
+        supported: live.has(p),
+        configured: withKeys || registry.isConfigured(p),
+        connectsWithCredentials: withKeys,
+        operatorKeys: withKeys && registry.isConfigured(p),
+      };
+    }),
   );
 });
 
@@ -115,10 +135,26 @@ function shopifyDomain(raw: string) {
   return shop;
 }
 
+/**
+ * Key-based platforms connect with the organization's own keys (POST …/credentials).
+ * Connecting one through the redirect flow uses the operator's keys from the admin
+ * console, which reach every account the operator manages, so only the platform
+ * operator may do that, for the operator's own organization.
+ */
+async function assertMayUseOperatorKeys(platform: Platform, userId: string) {
+  if (!connectsWithCredentials(platform)) return;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, isSuperAdmin: true, emailVerifiedAt: true } });
+  if (!user || !isSuperAdmin(user)) {
+    throw forbidden(`Connect ${PLATFORM_INFO[platform].name} with your own API keys.`);
+  }
+}
+
 /** Returns the platform's OAuth consent URL. The state token carries who/where to attach the connection. */
 integrationsRouter.post("/connections/:platform/authorize", requirePermission("integrations:manage"), async (req, res) => {
   assertNotLocked(req.org!);
   const platform = parse(platformParam, String(req.params.platform).toUpperCase());
+  if (!isPlatformShown(platform)) throw badRequest(`${PLATFORM_INFO[platform].name} isn't available.`);
+  await assertMayUseOperatorKeys(platform, req.userId!);
   const { workspaceId, shop: shopInput } = parse(authorizeBody, req.body);
   const ws = await prisma.workspace.findFirst({ where: { id: workspaceId, orgId: req.org!.id, archivedAt: null } });
   if (!ws) throw notFound("Workspace");
@@ -129,9 +165,130 @@ integrationsRouter.post("/connections/:platform/authorize", requirePermission("i
     config().OAUTH_STATE_SECRET,
     { expiresIn: "15m", issuer: "ashniva-oauth" },
   );
-  const url = connectors().get(platform).getAuthUrl({ state, redirectUri: oauthRedirectUri(platform) });
+  const connector = connectors().get(platform);
+  if (connector.startOAuth1) {
+    // OAuth 1.0a (X) brings no state back to the callback, so it waits in a cookie with the request token secret.
+    const { url, requestToken, requestSecret } = await connector.startOAuth1({ redirectUri: oauthRedirectUri(platform) });
+    const pending = jwt.sign({ state, token: requestToken, secret: encryptSecret(requestSecret) }, config().OAUTH_STATE_SECRET, {
+      expiresIn: "15m",
+      issuer: "ashniva-oauth1",
+    });
+    res.cookie(OAUTH1_COOKIE, pending, { httpOnly: true, secure: isProd(), sameSite: "lax", path: "/", maxAge: 15 * 60 * 1000 });
+    return res.json({ url });
+  }
+  const url = connector.getAuthUrl({ state, redirectUri: oauthRedirectUri(platform) });
   res.json({ url });
 });
+
+const credentialsBody = z.object({
+  workspaceId: z.string().min(1),
+  credentials: z.record(z.string(), z.string().max(10_000)),
+});
+
+/**
+ * Connects a key-based platform with the organization's own API keys. The keys
+ * are checked with a harmless read (who they belong to and which ad accounts
+ * they reach) before anything is saved, then stored encrypted on the connection.
+ */
+integrationsRouter.post("/connections/:platform/credentials", requirePermission("integrations:manage"), async (req, res) => {
+  assertNotLocked(req.org!);
+  const platform = parse(platformParam, String(req.params.platform).toUpperCase());
+  const spec = CONNECT_CREDENTIALS[platform];
+  if (!isPlatformShown(platform) || !spec) throw badRequest(`${PLATFORM_INFO[platform].name} doesn't connect with API keys.`);
+  const body = parse(credentialsBody, req.body);
+  const ws = await prisma.workspace.findFirst({ where: { id: body.workspaceId, orgId: req.org!.id, archivedAt: null } });
+  if (!ws) throw notFound("Workspace");
+
+  const credentials: PlatformCredentials = {};
+  const missing: Record<string, string[]> = {};
+  for (const field of spec.fields) {
+    const value = body.credentials[field.key]?.trim();
+    if (value) credentials[field.key] = value;
+    else missing[field.key] = [`Enter the ${field.label}.`];
+  }
+  if (Object.keys(missing).length) throw badRequest(`Enter every ${PLATFORM_INFO[platform].name} key.`, missing);
+
+  const connector = connectors().get(platform);
+  let tokens: OAuthTokens;
+  let user: ExternalUser;
+  let found: number;
+  try {
+    tokens = await connector.connectWithCredentials!(credentials);
+    const auth = { accessToken: tokens.accessToken, credentials };
+    user = await connector.getUser(auth);
+    found = (await connector.listAdAccounts(auth)).length;
+  } catch (err) {
+    throw badRequest(credentialsError(platform, err));
+  }
+  if (found === 0) {
+    throw badRequest(`These ${PLATFORM_INFO[platform].name} keys work, but they can't see any ad accounts. Give them access to an account and try again.`);
+  }
+
+  const { count } = await saveConnection({ orgId: req.org!.id, userId: req.userId!, workspaceId: ws.id, platform, tokens, user, credentials });
+  res.status(201).json({ connected: platform, accounts: count });
+});
+
+/** Why the platform turned the keys down, in words the person who pasted them can act on. */
+function credentialsError(platform: Platform, err: unknown) {
+  const name = PLATFORM_INFO[platform].name;
+  const message = err instanceof Error ? err.message.slice(0, 200) : "Unknown error";
+  if (!isConnectorError(err)) return `Couldn't check the ${name} keys: ${message}`;
+  // Our own checks (a missing field, a malformed private key) carry no platform reply.
+  if (err.details === undefined) return message;
+  if (err.code === "RATE_LIMITED" || err.code === "PLATFORM_ERROR") return `${name} couldn't check these keys right now (${message}). Try again in a minute.`;
+  return `${name} didn't accept these keys: ${message}. Check them and try again.`;
+}
+
+/**
+ * Saves (or refreshes) the organization's connection for this login, lists its
+ * ad accounts into the workspace while the plan has room, and queues the first sync.
+ */
+async function saveConnection(params: {
+  orgId: string;
+  userId: string;
+  workspaceId: string;
+  platform: Platform;
+  tokens: OAuthTokens;
+  user: ExternalUser;
+  /** The organization's own API keys; null for OAuth platforms and the operator's own keys. */
+  credentials: PlatformCredentials | null;
+}) {
+  const { orgId, userId, workspaceId, platform, tokens, user, credentials } = params;
+  const data = {
+    externalUserName: user.name,
+    accessTokenEnc: encryptSecret(tokens.accessToken),
+    credentialsEnc: encryptConnectionCredentials(platform, credentials),
+    tokenExpiresAt: tokens.expiresAt ?? null,
+    scopes: tokens.scopes,
+    status: "ACTIVE" as const,
+    syncStatus: "QUEUED" as const,
+    lastSyncError: null,
+    ...(tokens.refreshToken ? { refreshTokenEnc: encryptSecret(tokens.refreshToken) } : {}),
+  };
+  const connection = await prisma.platformConnection.upsert({
+    where: { orgId_platform_externalUserId: { orgId, platform, externalUserId: user.id } },
+    create: { ...data, orgId, platform, externalUserId: user.id, createdById: userId },
+    update: data,
+  });
+
+  // New accounts land in the workspace only while the plan has room and the workspace still exists (it may have
+  // been archived during the sign-in, and archiving frees its accounts); otherwise they wait unassigned.
+  const org = await prisma.organization.findUniqueOrThrow({ where: { id: orgId } });
+  const roomLeft = await assertWithinLimit(org, "adAccounts").then(() => true, () => false);
+  const target = workspaceId ? await prisma.workspace.findFirst({ where: { id: workspaceId, orgId, archivedAt: null }, select: { id: true } }) : null;
+  const count = await refreshAdAccounts(connection, { accessToken: tokens.accessToken, credentials }, roomLeft && target ? target.id : undefined);
+  await enqueueSync(connection.id, "connect");
+  await audit({
+    orgId,
+    workspaceId: target?.id ?? null,
+    userId,
+    action: "integration.connected",
+    entityType: "connection",
+    entityId: connection.id,
+    entityName: `${PLATFORM_INFO[platform].name} · ${user.name}`,
+  });
+  return { connection, count };
+}
 
 integrationsRouter.post("/connections/:connectionId/sync", requirePermission("integrations:manage"), async (req, res) => {
   assertNotLocked(req.org!);
@@ -255,6 +412,18 @@ async function authenticateRedirect(req: Request, res: Response): Promise<string
   }
 }
 
+/** The state and encrypted request token secret of an OAuth 1.0a sign-in, read once. */
+function takeOAuth1(req: Request, res: Response): { state: string; token: string; secret: string } | null {
+  const raw = req.cookies?.[OAUTH1_COOKIE] as string | undefined;
+  if (!raw) return null;
+  res.clearCookie(OAUTH1_COOKIE, { path: "/" });
+  try {
+    return jwt.verify(raw, config().OAUTH_STATE_SECRET, { issuer: "ashniva-oauth1" }) as { state: string; token: string; secret: string };
+  } catch {
+    return null;
+  }
+}
+
 oauthRouter.get("/:platform/callback", async (req, res) => {
   const userId = await authenticateRedirect(req, res);
   if (!userId) return res.redirect(`${config().WEB_URL}/login?error=session`);
@@ -267,8 +436,10 @@ oauthRouter.get("/:platform/callback", async (req, res) => {
     res.redirect(`${web}${target}?${new URLSearchParams(params)}`);
   };
 
+  // OAuth 1.0a (X) returns oauth_token and oauth_verifier (or denied=…) without a state.
+  const oauth1 = req.query.state ? null : takeOAuth1(req, res);
   try {
-    state = jwt.verify(String(req.query.state ?? ""), config().OAUTH_STATE_SECRET, {
+    state = jwt.verify(String(req.query.state ?? oauth1?.state ?? ""), config().OAUTH_STATE_SECRET, {
       issuer: "ashniva-oauth",
     }) as OAuthState;
   } catch {
@@ -278,52 +449,49 @@ oauthRouter.get("/:platform/callback", async (req, res) => {
   if (state.platform !== platform || state.userId !== userId) {
     return back({ error: "This connection request doesn't match your session." });
   }
-  if (req.query.error) {
+  if (req.query.error || req.query.denied) {
     return back({ error: String(req.query.error_description ?? "Access was not granted.") });
   }
-  // TikTok returns `auth_code`; everyone else uses the standard `code`.
-  const code = String(req.query.code ?? req.query.auth_code ?? "");
+  if (oauth1 && req.query.oauth_token !== oauth1.token) {
+    return back({ error: "This connection request doesn't match your session." });
+  }
+  // TikTok returns `auth_code`, OAuth 1.0a `oauth_verifier`; everyone else uses the standard `code`.
+  const code = String(req.query.code ?? req.query.auth_code ?? req.query.oauth_verifier ?? "");
   if (!code) throw badRequest("Missing authorization code.");
 
   const membership = await prisma.membership.findUnique({
     where: { userId_orgId: { userId: state.userId, orgId: state.orgId } },
   });
   if (!membership) return back({ error: "You no longer have access to this organization." });
+  // Re-check at completion: the role or plan may have changed during the sign-in.
+  if (!can(membership.role, "integrations:manage")) return back({ error: "You no longer have permission to connect platforms." });
+  if (!isPlatformShown(state.platform)) return back({ error: `${PLATFORM_INFO[state.platform].name} isn't available.` });
+  const owner = await prisma.organization.findUniqueOrThrow({ where: { id: state.orgId } });
+  if (isOrgLocked(owner)) return back({ error: "Your plan is inactive. Update billing to connect platforms." });
+  try {
+    await assertMayUseOperatorKeys(state.platform, state.userId);
+  } catch (err) {
+    return back({ error: err instanceof Error ? err.message : "You can't connect this platform." });
+  }
 
   try {
     const connector = connectors().get(state.platform);
-    const tokens = await connector.exchangeCode({ code, redirectUri: oauthRedirectUri(state.platform), state: String(req.query.state ?? "") });
-    const user = await connector.getUser({ accessToken: tokens.accessToken });
-
-    const data = {
-      externalUserName: user.name,
-      accessTokenEnc: encryptSecret(tokens.accessToken),
-      tokenExpiresAt: tokens.expiresAt ?? null,
-      scopes: tokens.scopes,
-      status: "ACTIVE" as const,
-      syncStatus: "QUEUED" as const,
-      lastSyncError: null,
-      ...(tokens.refreshToken ? { refreshTokenEnc: encryptSecret(tokens.refreshToken) } : {}),
-    };
-    const connection = await prisma.platformConnection.upsert({
-      where: { orgId_platform_externalUserId: { orgId: state.orgId, platform: state.platform, externalUserId: user.id } },
-      create: { ...data, orgId: state.orgId, platform: state.platform, externalUserId: user.id, createdById: state.userId },
-      update: data,
+    const tokens = await connector.exchangeCode({
+      code,
+      redirectUri: oauthRedirectUri(state.platform),
+      state: String(req.query.state ?? ""),
+      query: req.query as Record<string, unknown>,
+      requestSecret: oauth1 ? decryptSecret(oauth1.secret) : undefined,
     });
-
-    // New accounts land in the workspace only while the plan has room; otherwise they wait unassigned.
-    const org = await prisma.organization.findUniqueOrThrow({ where: { id: state.orgId } });
-    const roomLeft = await assertWithinLimit(org, "adAccounts").then(() => true, () => false);
-    const count = await refreshAdAccounts(connection, tokens.accessToken, roomLeft ? state.workspaceId : undefined);
-    await enqueueSync(connection.id, "connect");
-    await audit({
+    const user = await connector.getUser({ accessToken: tokens.accessToken });
+    const { count } = await saveConnection({
       orgId: state.orgId,
-      workspaceId: state.workspaceId,
       userId: state.userId,
-      action: "integration.connected",
-      entityType: "connection",
-      entityId: connection.id,
-      entityName: `${PLATFORM_INFO[state.platform].name} · ${user.name}`,
+      workspaceId: state.workspaceId,
+      platform: state.platform,
+      tokens,
+      user,
+      credentials: null,
     });
     return back({ connected: state.platform, accounts: String(count) });
   } catch (err) {

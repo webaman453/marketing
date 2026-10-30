@@ -6,7 +6,7 @@ import { num, prisma, type Prisma } from "@ashniva/db";
 import { PLATFORM_INFO } from "@ashniva/shared";
 import { audit } from "./audit";
 import { connectors } from "./connectors";
-import { getAccessToken } from "./tokens";
+import { getConnectorAuth } from "./tokens";
 
 export const campaignWithConnection = {
   adAccount: { include: { connection: true } },
@@ -27,7 +27,7 @@ async function connectorFor(campaign: CampaignWithConnection) {
   const { connection } = campaign.adAccount;
   return {
     connector: connectors().get(campaign.platform, connection.mode),
-    auth: { accessToken: await getAccessToken(connection) },
+    auth: await getConnectorAuth(connection),
     account: {
       externalId: campaign.adAccount.externalId,
       currency: campaign.adAccount.currency,

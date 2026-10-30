@@ -2,7 +2,7 @@
  * Pulls form leads from a platform and stores them. Lead access is a separate
  * permission, so a failure here never fails the rest of a sync.
  */
-import type { ExternalLead } from "@ashniva/connectors";
+import type { ConnectorAuth, ExternalLead } from "@ashniva/connectors";
 import { prisma, type PlatformConnection, type Prisma } from "@ashniva/db";
 import { connectors } from "./connectors";
 
@@ -27,7 +27,7 @@ export function contactOf(fields: Record<string, string[]>) {
   };
 }
 
-export async function syncLeads(connection: PlatformConnection, token: string): Promise<number> {
+export async function syncLeads(connection: PlatformConnection, auth: ConnectorAuth): Promise<number> {
   const connector = connectors().get(connection.platform, connection.mode);
   if (!connector.fetchLeads) return 0;
 
@@ -43,7 +43,7 @@ export async function syncLeads(connection: PlatformConnection, token: string): 
     select: { createdTime: true },
   });
   const since = latest ? new Date(latest.createdTime.getTime() - OVERLAP_MS) : null;
-  const leads = await connector.fetchLeads({ accessToken: token }, { since });
+  const leads = await connector.fetchLeads(auth, { since });
   if (leads.length === 0) return 0;
 
   const accountIds = accounts.map((a) => a.id);
@@ -56,15 +56,25 @@ export async function syncLeads(connection: PlatformConnection, token: string): 
   const groupBy = new Map(adGroups.map((g) => [g.externalId, g.id]));
   const campaignBy = new Map(campaigns.map((c) => [c.externalId, c]));
   const workspaceOf = new Map(accounts.map((a) => [a.id, a.workspaceId!]));
-  const fallbackWorkspace = accounts[0]!.workspaceId!;
+  // Organic or unmatched leads can only be placed when the login reports into a single workspace.
+  // With several (e.g. one Meta login for many clients) guessing would show one client another's leads.
+  const workspaces = new Set(accounts.map((a) => a.workspaceId!));
+  const fallbackWorkspace = workspaces.size === 1 ? [...workspaces][0]! : null;
 
-  const rows = leads.map((l: ExternalLead): Prisma.LeadCreateManyInput => {
+  const placed = leads.flatMap((l: ExternalLead) => {
     const ad = l.externalAdId ? adBy.get(l.externalAdId) : undefined;
     const campaign = l.externalCampaignId ? campaignBy.get(l.externalCampaignId) : undefined;
     const accountId = ad?.adAccountId ?? campaign?.adAccountId;
+    const workspaceId = (accountId && workspaceOf.get(accountId)) || fallbackWorkspace;
+    return workspaceId ? [{ l, ad, campaign, workspaceId }] : [];
+  });
+  const skipped = leads.length - placed.length;
+  if (skipped > 0) console.info(`[leads] ${skipped} lead(s) on connection ${connection.id} match no ad and the login spans several workspaces; not imported.`);
+
+  const rows = placed.map(({ l, ad, campaign, workspaceId }): Prisma.LeadCreateManyInput => {
     return {
       orgId: connection.orgId,
-      workspaceId: (accountId && workspaceOf.get(accountId)) || fallbackWorkspace,
+      workspaceId,
       connectionId: connection.id,
       platform: connection.platform,
       externalId: l.externalId,
@@ -86,7 +96,8 @@ export async function syncLeads(connection: PlatformConnection, token: string): 
     };
   });
 
-  // New leads only; a lead's answers never change after submission.
+  // New leads only; a lead's answers never change after submission. Rows that already exist are
+  // skipped, never updated, so the team's status and note (left at their defaults here) survive every sync.
   const res = await prisma.lead.createMany({ data: rows, skipDuplicates: true });
   return res.count;
 }

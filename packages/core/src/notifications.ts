@@ -20,6 +20,8 @@ export interface NotificationInput {
   body?: string;
   /** App-relative path, e.g. /w/<id>/campaigns/<id> */
   link?: string;
+  /** Label of the email's button to `link`. */
+  ctaLabel?: string;
   /** Recipients: explicit users, or everyone in the org with one of these roles. */
   userIds?: string[];
   roles?: Role[];
@@ -63,8 +65,24 @@ export async function notify(input: NotificationInput) {
       subject: input.title,
       heading: esc(input.title),
       body: esc(input.body ?? ""),
-      cta: input.link ? { label: "Open in Ashniva Ads", url: `${web}${input.link}` } : undefined,
+      cta: input.link ? { label: input.ctaLabel ?? "Open in Ashniva Ads", url: `${web}${input.link}` } : undefined,
     }).catch((err) => console.error("[notify] email failed", err));
   }
   return members.length;
+}
+
+/**
+ * Where an alert about a platform connection should take people: the Integrations page of a
+ * workspace one of its ad accounts is assigned to, else the org's first workspace.
+ */
+export async function connectionAlertTarget(connection: { id: string; orgId: string }): Promise<{ workspaceId?: string; link?: string }> {
+  const account = await prisma.adAccount.findFirst({
+    where: { connectionId: connection.id, workspace: { archivedAt: null } },
+    orderBy: { createdAt: "asc" },
+    select: { workspaceId: true },
+  });
+  const workspaceId =
+    account?.workspaceId ??
+    (await prisma.workspace.findFirst({ where: { orgId: connection.orgId, archivedAt: null }, orderBy: { createdAt: "asc" }, select: { id: true } }))?.id;
+  return workspaceId ? { workspaceId, link: `/w/${workspaceId}/integrations` } : {};
 }

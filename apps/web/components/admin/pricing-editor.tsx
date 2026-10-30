@@ -40,6 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { money, timeAgo, tokenCount } from "@/lib/format";
 import { toastError } from "@/lib/forms";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { cn } from "@/lib/utils";
 
 interface CatalogResponse {
@@ -148,6 +149,7 @@ function PricingForm({ data }: { data: CatalogResponse }) {
     () => JSON.stringify(draft) !== JSON.stringify(data.catalog),
     [draft, data],
   );
+  useUnsavedChanges(dirty);
   const problems = useMemo(() => {
     const r = catalogSchema.safeParse(draft);
     const out = r.success

@@ -1,6 +1,6 @@
 /** Apple Search Ads: app campaign, keyword ad group, search-results or product-page creative. */
-import { budgetFields, launchSection, locationsField, nameField, opts } from "../common";
-import type { PlatformBuilderSpec } from "../types";
+import { adIs, budgetFields, launchSection, locationsField, nameField, opts, scheduleFields } from "../common";
+import type { BuilderIssue, PlatformBuilderSpec } from "../types";
 
 export const appleSpec: PlatformBuilderSpec = {
   platform: "APPLE",
@@ -15,8 +15,8 @@ export const appleSpec: PlatformBuilderSpec = {
   campaign: {
     label: "Campaign",
     sections: [
-      { id: "app", title: "App", fields: [nameField("Campaign name", "Brand search – India"), { key: "adamId", type: "text", label: "App Store adam ID", placeholder: "1234567890", required: true, help: "The numeric id of the app." }] },
-      { id: "where", title: "Storefronts", fields: [locationsField({ help: "Countries whose App Store should show the ad." })] },
+      { id: "app", title: "App", fields: [nameField("Campaign name", "Brand search – India"), { key: "adamId", type: "text", label: "App Store adam ID", placeholder: "1234567890", required: true, maxLength: 12, help: "The numeric id of the app, from its App Store URL (…/id1234567890)." }] },
+      { id: "where", title: "Storefronts", fields: [locationsField({ allowExclude: false, help: "Countries whose App Store should show the ad." })] },
       { id: "budget", title: "Budget", fields: budgetFields({ lifetime: false }) },
       launchSection(),
     ],
@@ -34,6 +34,12 @@ export const appleSpec: PlatformBuilderSpec = {
           { key: "cpa", type: "money", label: "CPA goal", min: 0.01, width: "half" },
           { key: "keywords", type: "keywords", label: "Keywords", matchTypes: ["BROAD", "EXACT"], max: 5000, help: "Apple treats phrase match as broad." },
         ],
+      },
+      {
+        id: "schedule",
+        title: "Schedule",
+        // Apple schedules ad groups (startTime/endTime), not campaigns.
+        fields: scheduleFields({ datetime: true }).map((f) => (f.key === "startDate" ? { ...f, help: "Leave empty to start as soon as it's published." } : { ...f, help: "Optional. Leave empty to run until you pause it." })),
       },
     ],
   },
@@ -55,11 +61,27 @@ export const appleSpec: PlatformBuilderSpec = {
             ]),
             default: "SEARCH_RESULTS",
           },
+          {
+            key: "productPageId",
+            type: "text",
+            label: "Product page id",
+            placeholder: "45812c9b-c296-43d3-c6a0-c5a02f74bf6e",
+            required: true,
+            maxLength: 64,
+            showIf: adIs("creativeType", "CUSTOM_PRODUCT_PAGE"),
+            help: "The custom product page id from App Store Connect.",
+          },
         ],
       },
     ],
   }),
   maxAdGroups: 10,
   maxAds: 5,
-  previews: () => ["google_search_mobile"],
+  previews: () => ["app_store_search"],
+  validate: (draft) => {
+    const issues: BuilderIssue[] = [];
+    const adamId = typeof draft.campaign.adamId === "string" ? draft.campaign.adamId.trim() : String(draft.campaign.adamId ?? "");
+    if (adamId && !/^\d+$/.test(adamId)) issues.push({ level: "campaign", field: "adamId", message: "App Store adam ID must be digits only, e.g. 1234567890." });
+    return issues;
+  },
 };

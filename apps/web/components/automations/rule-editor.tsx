@@ -26,6 +26,16 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/components/app/workspace-context";
 import { FormField } from "@/components/form-field";
 import { PlatformIcon } from "@/components/platform-icon";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +48,7 @@ import { api } from "@/lib/api";
 import { dateTime, timeAgo } from "@/lib/format";
 import { toastError } from "@/lib/forms";
 import { qk2, useAiStatus, useCampaigns, useRuleRuns, useWorkspaceAdAccounts } from "@/lib/queries";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { cn } from "@/lib/utils";
 import { conditionValue, describeAction, describeConditions } from "./rule-text";
 
@@ -53,6 +64,19 @@ const blank = (): RuleInput => ({
   cooldownHours: 24,
 });
 
+/** The editable part of a saved rule, in the same shape as the form. */
+const toInput = (r: RuleDTO): RuleInput => ({
+  name: r.name,
+  isActive: r.isActive,
+  scope: r.scope,
+  conditionLogic: r.conditionLogic,
+  conditions: r.conditions,
+  actions: r.actions,
+  lookbackDays: r.lookbackDays,
+  frequency: r.frequency,
+  cooldownHours: r.cooldownHours,
+});
+
 const unitHint = (metric: string, currency: string) =>
   metric === "ctr" ? "%" : metric === "roas" ? "×" : ["spend", "cpc", "cpm", "cpa"].includes(metric) ? currency : "";
 
@@ -65,14 +89,15 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
   const canEdit = can("campaigns:edit");
 
   const [saved, setSaved] = useState<RuleDTO | null>(rule);
-  const [form, setForm] = useState<RuleInput>(() =>
-    rule
-      ? { name: rule.name, isActive: rule.isActive, scope: rule.scope, conditionLogic: rule.conditionLogic, conditions: rule.conditions, actions: rule.actions, lookbackDays: rule.lookbackDays, frequency: rule.frequency, cooldownHours: rule.cooldownHours }
-      : blank(),
-  );
+  const [form, setForm] = useState<RuleInput>(() => (rule ? toInput(rule) : blank()));
+  // What the form held when it was last loaded or saved.
+  const [baseline, setBaseline] = useState(() => JSON.stringify(rule ? toInput(rule) : blank()));
   const [busy, setBusy] = useState<"save" | "preview" | "run" | null>(null);
   const [preview, setPreview] = useState<RuleRunDTO | null>(null);
   const [campaignSearch, setCampaignSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  useUnsavedChanges(canEdit && !deleting && JSON.stringify(form) !== baseline);
 
   const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))].filter(isPlatformShown), [accounts.data]);
   const currency = workspace.currency;
@@ -89,6 +114,7 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
         ? await api<RuleDTO>(`/workspaces/${workspace.id}/rules/${saved.id}`, { method: "PATCH", body: form })
         : await api<RuleDTO>(`/workspaces/${workspace.id}/rules`, { method: "POST", body: form });
       setSaved(result);
+      setBaseline(JSON.stringify(form));
       void queryClient.invalidateQueries({ queryKey: qk2.rules(workspace.id) });
       toast.success("Rule saved", { description: result.isActive ? "It will run on the next check." : "It's paused; switch it on when ready." });
       if (!saved) router.replace(`/w/${workspace.id}/automations/${result.id}`);
@@ -122,12 +148,15 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
 
   async function remove() {
     if (!saved) return;
+    setDeleting(true);
     try {
       await api(`/workspaces/${workspace.id}/rules/${saved.id}`, { method: "DELETE" });
       toast.success("Rule deleted");
+      setConfirmDelete(false);
       void queryClient.invalidateQueries({ queryKey: qk2.rules(workspace.id) });
       router.push(`/w/${workspace.id}/automations`);
     } catch (err) {
+      setDeleting(false);
       toastError(err);
     }
   }
@@ -361,9 +390,32 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
           </Card>
 
           {saved && canEdit && (
-            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={remove}>
+            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
               <Trash2 /> Delete rule
             </Button>
+          )}
+          {saved && (
+            <AlertDialog open={confirmDelete} onOpenChange={(o) => !deleting && setConfirmDelete(o)}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete “{saved.name}”?</AlertDialogTitle>
+                  <AlertDialogDescription>The rule stops running and can’t be restored.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-destructive text-white hover:bg-destructive/90"
+                    disabled={deleting}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void remove();
+                    }}
+                  >
+                    {deleting && <Loader2 className="animate-spin" />} Delete rule
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
 

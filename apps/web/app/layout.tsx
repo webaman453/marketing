@@ -22,16 +22,27 @@ export const viewport: Viewport = {
   ],
 };
 
+/**
+ * Central Control installation. Production builds use the ads site's installation;
+ * local development only loads it when NEXT_PUBLIC_CONTROL_INSTALLATION is set,
+ * because the installation rejects localhost.
+ */
+const CONTROL_INSTALLATION =
+  process.env.NEXT_PUBLIC_CONTROL_INSTALLATION ??
+  (process.env.NODE_ENV === "production" ? "inst_8d376e4c01a58ee0ef363e37988d89c7" : undefined);
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${inter.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full">
         <Providers>{children}</Providers>
-        <Script
-          src="https://control.ashniva.com/api/v1/public/loader.js?i=inst_8d376e4c01a58ee0ef363e37988d89c7"
-          strategy="beforeInteractive"
-          data-installation-id="inst_8d376e4c01a58ee0ef363e37988d89c7"
-        />
+        {CONTROL_INSTALLATION && (
+          <Script
+            src={`https://control.ashniva.com/api/v1/public/loader.js?i=${CONTROL_INSTALLATION}`}
+            strategy="beforeInteractive"
+            data-installation-id={CONTROL_INSTALLATION}
+          />
+        )}
       </body>
     </html>
   );

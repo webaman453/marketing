@@ -9,14 +9,16 @@ import {
   registerSchema,
   resetPasswordSchema,
   updateProfileSchema,
+  verifyEmailSchema,
 } from "@ashniva/shared";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { config } from "../config";
 import { badRequest, conflict, HttpError, notFound, parse, unauthorized } from "../lib/errors";
+import { markEmailVerified, sendVerificationEmail } from "../lib/email-verification";
 import { esc, sendMail } from "../lib/mailer";
 import { createOwnedOrg, newOrgSlug } from "../lib/org-setup";
-import { buildMe, isSuperAdmin, toUserDTO } from "../lib/serialize";
+import { buildMe, toUserDTO } from "../lib/serialize";
 import { clearSessionCookies, endSession, rotateSession, startSession } from "../lib/session";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middleware/auth";
@@ -25,6 +27,7 @@ import { verifyAccess, ACCESS_COOKIE } from "../lib/session";
 export const authRouter = Router();
 
 const RESET_TTL_MS = 60 * 60 * 1000;
+const RESEND_COOLDOWN_MS = 60 * 1000;
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -48,11 +51,12 @@ authRouter.post("/register", authLimiter, async (req, res) => {
 
   const user = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash } });
-    const grant = isSuperAdmin({ email: input.email, isSuperAdmin: false }) ? "complimentary" : "unpaid";
-    await createOwnedOrg(tx, user.id, input.companyName, orgSlug, grant);
+    // Unverified, so never an operator yet: their org turns complimentary when they verify.
+    await createOwnedOrg(tx, user.id, input.companyName, orgSlug, "unpaid");
     return user;
   });
 
+  await sendVerificationEmail(user);
   await startSession(req, res, user.id);
   res.status(201).json(await buildMe(user.id));
 });
@@ -95,7 +99,7 @@ authRouter.patch("/me", requireAuth, async (req, res) => {
 authRouter.post("/change-password", requireAuth, authLimiter, async (req, res) => {
   const input = parse(changePasswordSchema, req.body);
   const user = await prisma.user.findUniqueOrThrow({ where: { id: req.userId! } });
-  if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+  if (!(await verifyPassword(input.currentPassword, user.passwordHash ?? DUMMY_HASH))) {
     throw new HttpError(422, "VALIDATION_ERROR", "Current password is incorrect.", {
       currentPassword: ["Current password is incorrect."],
     });
@@ -140,11 +144,44 @@ authRouter.post("/reset-password", authLimiter, async (req, res) => {
   if (!record || record.usedAt || record.expiresAt < new Date()) {
     throw badRequest("This reset link is invalid or has expired. Please request a new one.");
   }
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: record.userId }, data: { passwordHash: await hashPassword(input.password) } }),
-    prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
-    prisma.session.updateMany({ where: { userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-  ]);
+  const passwordHash = await hashPassword(input.password);
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
+    await tx.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } });
+    await tx.session.updateMany({ where: { userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    // The link was emailed to them, so it proves they own the address (also how admin-created accounts get verified).
+    await markEmailVerified(tx, record.userId);
+  });
+  res.status(204).end();
+});
+
+// ───────── Email verification ─────────
+
+/** Public, so the link works in whichever browser the email opens in. */
+authRouter.post("/verify-email", authLimiter, async (req, res) => {
+  const { token } = parse(verifyEmailSchema, req.body);
+  const record = await prisma.emailVerificationToken.findUnique({ where: { tokenHash: sha256(token) } });
+  if (!record || record.usedAt || record.expiresAt < new Date()) {
+    throw badRequest("This verification link is invalid or has expired. Sign in and send yourself a new one.");
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.emailVerificationToken.update({ where: { id: record.id }, data: { usedAt: new Date() } });
+    await markEmailVerified(tx, record.userId);
+  });
+  res.status(204).end();
+});
+
+authRouter.post("/resend-verification", requireAuth, authLimiter, async (req, res) => {
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.userId! } });
+  if (user.emailVerifiedAt) {
+    res.status(204).end();
+    return;
+  }
+  const last = await prisma.emailVerificationToken.findFirst({ where: { userId: user.id }, orderBy: { createdAt: "desc" } });
+  if (last && Date.now() - last.createdAt.getTime() < RESEND_COOLDOWN_MS) {
+    throw new HttpError(429, "RATE_LIMITED", "We just sent a link. Please wait a minute before asking for another.");
+  }
+  await sendVerificationEmail(user);
   res.status(204).end();
 });
 

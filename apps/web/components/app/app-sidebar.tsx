@@ -21,11 +21,13 @@ import {
   ShieldCheck,
   Sun,
   UserRound,
+  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Permission } from "@ashniva/shared";
 import { LogoMark } from "@/components/brand";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -74,13 +76,14 @@ const NAV_GROUPS = [
     label: "Manage",
     items: [
       { href: "campaigns", label: "Campaigns", icon: Megaphone },
-      { href: "formats", label: "Ad formats", icon: LayoutGrid },
+      { href: "formats", label: "Ad formats", icon: LayoutGrid, permission: "campaigns:edit" },
       { href: "leads", label: "Leads", icon: Contact },
       { href: "creatives", label: "Creatives", icon: FileImage },
+      { href: "spend", label: "Spend & billing", icon: Wallet },
       { href: "automations", label: "Automations", icon: Bot },
     ],
   },
-] as const;
+] as const satisfies readonly { label: string; items: readonly { href: string; label: string; icon: unknown; permission?: Permission }[] }[];
 
 export function AppSidebar() {
   const { me, workspace, can } = useWorkspace();
@@ -100,7 +103,7 @@ export function AppSidebar() {
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {group.items.map((item) => (
+                {group.items.filter((item) => !("permission" in item) || can(item.permission)).map((item) => (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={isActive(item.href)} tooltip={item.label}>
                       <Link href={`${base}/${item.href}`}>

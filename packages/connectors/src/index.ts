@@ -22,6 +22,7 @@ import type { AdPlatformConnector } from "./types";
 
 export * from "./types";
 export * from "./errors";
+export { removalAllowed } from "./tree";
 export { MetaConnector } from "./meta";
 export { GoogleAdsConnector } from "./google";
 export { TikTokConnector } from "./tiktok";

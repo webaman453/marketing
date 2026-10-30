@@ -3,7 +3,7 @@
  * REST): campaign group → campaigns → media → creatives (inline dark posts).
  */
 import { LINKEDIN_JOB_FUNCTIONS, countryName, type BuilderDraft, type BuilderOptions, type TargetingKind, type TargetingSearchResult, type TargetingValue } from "@ashniva/shared";
-import { bool, budgetOf, dateOf, excluded, included, mediaOf, num, repeater, str, strs, withParams } from "../builder-values";
+import { bool, budgetOf, builderZone, dayIn, excluded, included, instantOf, mediaOf, num, repeater, str, strs, withParams } from "../builder-values";
 import { ConnectorError } from "../errors";
 import type { AccountStructure, BuilderAsset } from "../types";
 
@@ -14,6 +14,10 @@ export interface LinkedInApi {
   /** POST that returns the new entity's id from the x-restli-id header (or the body). */
   create(pathAndQuery: string, body: unknown): Promise<string>;
   post<T>(pathAndQuery: string, body: unknown): Promise<T>;
+  /** JSON PUT to a versioned REST path (e.g. a campaignConversions association). */
+  putJson(pathAndQuery: string, body: unknown): Promise<void>;
+  /** The signed-in member from OpenID userinfo (/v2/userinfo). */
+  userinfo(): Promise<{ sub?: string; name?: string }>;
   put(url: string, data: Buffer, contentType: string): Promise<string | null>;
   /** Rest.li partial update ($set). */
   patch(pathAndQuery: string, set: Record<string, unknown>): Promise<void>;
@@ -28,7 +32,7 @@ export async function linkedinBuilderOptions(api: LinkedInApi, accountId: string
     safe(api.get<{ elements?: Row[] }>(`/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&state=APPROVED`), { elements: [] }),
     safe(api.get<{ elements?: Row[] }>(`/conversions?q=account&account=${enc(`urn:li:sponsoredAccount:${accountId}`)}`), { elements: [] }),
     safe(api.get<{ elements?: Row[] }>(`/leadForms?q=owner&owner=(sponsoredAccount:${enc(`urn:li:sponsoredAccount:${accountId}`)})`), { elements: [] }),
-    safe(api.get<{ sub?: string; name?: string }>(`/userinfo`), {} as { sub?: string; name?: string }),
+    safe(api.userinfo(), {} as { sub?: string; name?: string }),
   ]);
   const orgUrns = (acls.elements ?? []).map((a) => String(a.organization ?? a.organizationTarget ?? "")).filter(Boolean);
   const orgs = await Promise.all(
@@ -144,7 +148,7 @@ async function uploadVideo(api: LinkedInApi, owner: string, asset: BuilderAsset)
   return init.value.video;
 }
 
-export async function linkedinCreateCampaign(api: LinkedInApi, account: { externalId: string; currency: string }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
+export async function linkedinCreateCampaign(api: LinkedInApi, account: { externalId: string; currency: string; timezone?: string | null }, draft: BuilderDraft, assets: Map<string, BuilderAsset>): Promise<AccountStructure> {
   const acct = account.externalId;
   const accountUrn = `urn:li:sponsoredAccount:${acct}`;
   const c = draft.campaign;
@@ -153,8 +157,10 @@ export async function linkedinCreateCampaign(api: LinkedInApi, account: { extern
   const fmt = FORMAT[String(draft.setup.format)];
   if (!fmt) throw new ConnectorError("UNSUPPORTED", "This LinkedIn ad format can't be published from here yet.");
   // The group's schedule spans its campaigns (LinkedIn needs one on the group too).
-  const starts = draft.adGroups.map((g) => dateOf(g.values, "startDate")).filter((d): d is Date => Boolean(d));
-  const ends = draft.adGroups.map((g) => dateOf(g.values, "endDate"));
+  // Dates are days in the ad account's zone: start of the start day, end of the end day.
+  const tz = builderZone(account);
+  const starts = draft.adGroups.map((g) => instantOf(g.values, "startDate", tz)).filter((d): d is Date => Boolean(d));
+  const ends = draft.adGroups.map((g) => instantOf(g.values, "endDate", tz, "end"));
   const start = starts.length ? new Date(Math.min(Date.now(), ...starts.map((d) => d.getTime()))) : new Date();
   const end = ends.every((d) => d) ? new Date(Math.max(...ends.map((d) => d!.getTime()))) : null;
 
@@ -168,7 +174,7 @@ export async function linkedinCreateCampaign(api: LinkedInApi, account: { extern
   const groupUrn = `urn:li:sponsoredCampaignGroup:${groupId}`;
   const structure: AccountStructure = {
     campaigns: [
-      { externalId: groupId, name: str(c, "name"), status, deliveryStatus: null, objective, dailyBudget: null, lifetimeBudget: null, startDate: start.toISOString().slice(0, 10), endDate: end ? end.toISOString().slice(0, 10) : null, updatedAt: new Date(), raw: {} },
+      { externalId: groupId, name: str(c, "name"), status, deliveryStatus: null, objective, dailyBudget: null, lifetimeBudget: null, startDate: dayIn(start, tz), endDate: end ? dayIn(end, tz) : null, updatedAt: new Date(), raw: {} },
     ],
     adGroups: [],
     ads: [],
@@ -179,8 +185,8 @@ export async function linkedinCreateCampaign(api: LinkedInApi, account: { extern
       const v = g.values;
       const budget = budgetOf(v);
       if (!budget) throw new ConnectorError("INVALID_REQUEST", `Enter a budget for campaign “${str(v, "name")}”.`);
-      const gStart = dateOf(v, "startDate") ?? start;
-      const gEnd = dateOf(v, "endDate") ?? end;
+      const gStart = instantOf(v, "startDate", tz) ?? start;
+      const gEnd = instantOf(v, "endDate", tz, "end") ?? end;
       const [lang, country] = (str(v, "locale") || "en_US").split("_");
       const campaignId = await api.create(`/adAccounts/${acct}/adCampaigns`, {
         account: accountUrn,
@@ -204,7 +210,8 @@ export async function linkedinCreateCampaign(api: LinkedInApi, account: { extern
       for (const conv of strs(v, "conversions")) {
         const conversion = `urn:lla:llaPartnerConversion:${conv}`;
         try {
-          await api.post(`/campaignConversions/(campaign:${enc(campaignUrn)},conversion:${enc(conversion)})`, { campaign: campaignUrn, conversion });
+          // conversion-tracking doc: associate with PUT /campaignConversions/(campaign:…,conversion:…).
+          await api.putJson(`/campaignConversions/(campaign:${enc(campaignUrn)},conversion:${enc(conversion)})`, { campaign: campaignUrn, conversion });
         } catch (err) {
           (structure.warnings ??= []).push(`Conversion ${conv} couldn't be linked to “${str(v, "name")}”: ${err instanceof Error ? err.message : String(err)}. Link it in Campaign Manager.`);
         }

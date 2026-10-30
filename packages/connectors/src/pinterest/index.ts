@@ -8,7 +8,7 @@
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { addDays } from "@ashniva/shared";
 import { ConnectorError } from "../errors";
-import { codeFromStatus, requestJson, type RequestOptions } from "../http";
+import { allPages, codeFromStatus, requestJson, type RequestOptions } from "../http";
 import type {
   AccountRef,
   AccountStructure,
@@ -56,17 +56,18 @@ export class PinterestConnector implements AdPlatformConnector {
     return requestJson<T>(`${API}${path}`, { ...opts, headers: { Authorization: `Bearer ${auth.accessToken}`, ...opts.headers } }, this.mapError);
   }
 
-  private async all(path: string, auth: ConnectorAuth, query: Record<string, string | number> = {}) {
-    const out: Row[] = [];
-    let bookmark: string | undefined;
-    do {
-      const res = await this.call<{ items: Row[]; bookmark?: string | null }>(path, auth, {
-        query: { ...query, page_size: 250, bookmark },
-      });
-      out.push(...(res.items ?? []));
-      bookmark = res.bookmark ?? undefined;
-    } while (bookmark);
-    return out;
+  /** Follows `bookmark` paging to the last page, capped at MAX_PAGES like every list. */
+  private all(path: string, auth: ConnectorAuth, query: Record<string, string | number> = {}) {
+    return allPages<Row, string | undefined>(
+      undefined,
+      async (bookmark) => {
+        const res = await this.call<{ items: Row[]; bookmark?: string | null }>(path, auth, {
+          query: { ...query, page_size: 250, bookmark },
+        });
+        return { items: res.items ?? [], next: res.bookmark };
+      },
+      `Pinterest ${path} list`,
+    );
   }
 
   getAuthUrl({ state, redirectUri }: { state: string; redirectUri: string }) {

@@ -1,7 +1,7 @@
 /**
  * Background worker:
  *  - sync queue: platform data syncs and the periodic re-sync fan-out
- *  - automation queue: automation rules and scheduled report emails
+ *  - automation queue: automation rules, scheduled report emails and monthly spend budgets
  */
 import { loadEnv } from "@ashniva/core";
 
@@ -13,6 +13,7 @@ const { prisma } = await import("@ashniva/db");
 const {
   AUTOMATION_QUEUE,
   SYNC_QUEUE,
+  checkSpendBudgets,
   deliverReport,
   enqueueSync,
   evaluateRule,
@@ -21,6 +22,7 @@ const {
   isOrgLocked,
   loadPlatformSettings,
   redisConnection,
+  refreshRates,
   syncConnection,
 } = await import("@ashniva/core");
 
@@ -87,10 +89,12 @@ const automationWorker = new Worker(
         return { queued: due.length };
       }
       case "reports-tick": {
-        const due = await prisma.report.findMany({
+        const scheduled = await prisma.report.findMany({
           where: { scheduleFrequency: { not: null }, nextRunAt: { lte: now }, workspace: { archivedAt: null } },
-          select: { id: true, nextRunAt: true },
+          select: { id: true, nextRunAt: true, org: { select: { plan: true, trialEndsAt: true, subscriptionStatus: true, currentPeriodEnd: true } } },
         });
+        // Organizations on an inactive plan get no scheduled reports (their data isn't synced either).
+        const due = scheduled.filter((r) => !isOrgLocked(r.org));
         for (const r of due) await queue.add("report", { reportId: r.id }, { jobId: `report-${r.id}-${r.nextRunAt?.getTime() ?? 0}` });
         return { queued: due.length };
       }
@@ -103,6 +107,17 @@ const automationWorker = new Worker(
         await deliverReport(job.data.reportId);
         log(`report ${job.data.reportId} delivered`);
         return { ok: true };
+      }
+      case "spend-tick": {
+        // Monthly budgets: alerts at the alert percent and at the budget, and the optional pause.
+        const run = await checkSpendBudgets(now);
+        if (run.alerts || run.paused) log(`spend: ${run.checked} budgets, ${run.alerts} alerts, ${run.paused} campaigns paused`);
+        return run;
+      }
+      case "fx-refresh": {
+        // ECB reference rates for currency conversion in workspace totals.
+        const { stored } = await refreshRates();
+        return { stored };
       }
     }
   },
@@ -121,6 +136,10 @@ await getSyncQueue().upsertJobScheduler(
 );
 await getAutomationQueue().upsertJobScheduler("rules-tick", { every: 5 * 60_000 }, { name: "rules-tick" });
 await getAutomationQueue().upsertJobScheduler("reports-tick", { every: 5 * 60_000 }, { name: "reports-tick" });
+// Spend comes in with each sync; checking budgets every 15 minutes keeps a pause close to the limit.
+await getAutomationQueue().upsertJobScheduler("spend-tick", { every: 15 * 60_000 }, { name: "spend-tick" });
+// The ECB publishes once a weekday around 16:00 CET; checking every 6 hours keeps the cache current.
+await getAutomationQueue().upsertJobScheduler("fx-refresh", { every: 6 * 60 * 60_000 }, { name: "fx-refresh" });
 log(`worker ready · re-syncing every ${intervalMin} min · rules & reports checked every 5 min`);
 
 async function shutdown() {

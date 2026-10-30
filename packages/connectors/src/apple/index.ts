@@ -3,11 +3,13 @@
  * Client credentials, then one connection per organization.
  * Docs: https://developer.apple.com/documentation/apple_ads
  */
+import { createPrivateKey, sign } from "node:crypto";
 import type { BuilderDraft, BuilderOptions, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
-import { ConnectorError } from "../errors";
-import { requestJson, type RequestOptions } from "../http";
-import { CLIENT_REFRESH, apiError, authHeader, formToken, mapStatus, selfRedirect } from "../oauth-flow";
-import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens } from "../types";
+import { ConnectorError, noRowsUnlessFatal } from "../errors";
+import { allPages, requestJson, type RequestOptions } from "../http";
+import { CLIENT_REFRESH, apiError, authHeader, formToken, mapStatus, requireCredentials, selfRedirect } from "../oauth-flow";
+import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, ExternalAdAccount, ExternalMetricRow, OAuthTokens, PlatformCredentials } from "../types";
+import { builderZone } from "../builder-values";
 import { appleCreateCampaign, type AppleApi } from "./builder";
 
 export interface AppleConfig {
@@ -41,12 +43,26 @@ export class AppleAdsConnector implements AdPlatformConnector {
     return selfRedirect(redirectUri, state);
   }
 
-  private clientToken() {
-    this.assertConfigured();
+  /**
+   * Access token for the connection's own API user, or the operator's from
+   * config (a pre-signed client secret) for the operator's own connection.
+   */
+  private async clientToken(credentials?: PlatformCredentials | null) {
+    let clientId: string;
+    let clientSecret: string;
+    if (credentials) {
+      const keys = requireCredentials(this.platform, credentials);
+      clientId = keys.clientId!;
+      clientSecret = appleClientSecret({ clientId, teamId: keys.teamId!, keyId: keys.keyId!, privateKey: keys.privateKey! });
+    } else {
+      this.assertConfigured();
+      clientId = this.config.clientId!;
+      clientSecret = this.config.clientSecret!;
+    }
     return formToken("https://appleid.apple.com/auth/oauth2/token", {
       grant_type: "client_credentials",
-      client_id: this.config.clientId!,
-      client_secret: this.config.clientSecret!,
+      client_id: clientId,
+      client_secret: clientSecret,
       scope: "searchadsorg",
     }).then((t) => ({ ...t, refreshToken: CLIENT_REFRESH }));
   }
@@ -55,8 +71,13 @@ export class AppleAdsConnector implements AdPlatformConnector {
     return this.clientToken();
   }
 
-  refreshTokens(_refreshToken: string) {
-    return this.clientToken();
+  /** Signs a fresh client secret on every refresh, so Apple's 180-day secret limit never runs out. */
+  refreshTokens(_refreshToken: string, credentials?: PlatformCredentials | null) {
+    return this.clientToken(credentials);
+  }
+
+  async connectWithCredentials(credentials: PlatformCredentials) {
+    return this.clientToken(credentials);
   }
 
   async getUser(auth: ConnectorAuth) {
@@ -77,7 +98,7 @@ export class AppleAdsConnector implements AdPlatformConnector {
   }
 
   async fetchStructure(auth: ConnectorAuth, account: AccountRef): Promise<AccountStructure> {
-    const campaigns = (await this.call<{ data?: Row[] }>("/campaigns", auth, account, { query: { limit: 100 } })).data ?? [];
+    const campaigns = await this.listAll("/campaigns", auth, account);
     const structure: AccountStructure = { campaigns: [], adGroups: [], ads: [] };
     for (const c of campaigns) {
       const cid = String(c.id);
@@ -94,7 +115,7 @@ export class AppleAdsConnector implements AdPlatformConnector {
         updatedAt: null,
         raw: { adamId: c.adamId },
       });
-      const groups = (await this.call<{ data?: Row[] }>(`/campaigns/${cid}/adgroups`, auth, account, { query: { limit: 100 } }).catch(() => ({ data: [] }))).data ?? [];
+      const groups = await this.listAll(`/campaigns/${cid}/adgroups`, auth, account);
       for (const g of groups) {
         structure.adGroups.push({
           externalId: String(g.id),
@@ -106,7 +127,9 @@ export class AppleAdsConnector implements AdPlatformConnector {
           targeting: null,
           raw: {},
         });
-        const ads = (await this.call<{ data?: Row[] }>(`/campaigns/${cid}/adgroups/${g.id}/ads`, auth, account).catch(() => ({ data: [] }))).data ?? [];
+        // Ads are optional here: campaign types without ad variations answer 4xx, and ads are not
+        // removed by a sync, so a missing list only leaves them as last seen. Auth/rate limits still throw.
+        const ads = await this.listAll(`/campaigns/${cid}/adgroups/${g.id}/ads`, auth, account).catch(noRowsUnlessFatal<Row>);
         for (const a of ads) {
           structure.ads.push({
             externalId: String(a.id),
@@ -126,41 +149,50 @@ export class AppleAdsConnector implements AdPlatformConnector {
     return structure;
   }
 
+  /** v5 lists page with offset/limit and report pagination.totalResults. */
+  private listAll(path: string, auth: ConnectorAuth, account: AccountRef) {
+    const limit = 1000;
+    return allPages<Row, number>(0, async (offset) => {
+      const res = await this.call<{ data?: Row[]; pagination?: { totalResults?: number } }>(path, auth, account, { query: { offset, limit } });
+      const rows = res.data ?? [];
+      const total = Number(res.pagination?.totalResults ?? 0);
+      const next = offset + rows.length;
+      return { items: rows, next: total ? (next < total ? next : null) : rows.length === limit ? next : null };
+    }, "Apple Ads list");
+  }
+
   async fetchMetrics(auth: ConnectorAuth, account: AccountRef, range: { from: string; to: string }): Promise<ExternalMetricRow[]> {
-    try {
-      const res = await this.call<{ data?: { reportingDataResponse?: { row?: Row[] } } }>("/reports/campaigns", auth, account, {
-        method: "POST",
-        body: {
-          startTime: range.from,
-          endTime: range.to,
-          granularity: "DAILY",
-          selector: { pagination: { offset: 0, limit: 1000 } },
-          returnRowTotals: false,
-          returnGrandTotals: false,
-        },
-      });
-      const rows = res.data?.reportingDataResponse?.row ?? [];
-      const out: ExternalMetricRow[] = [];
-      for (const row of rows) {
-        const id = String(row.metadata?.campaignId);
-        for (const g of row.granularity ?? []) {
-          out.push({
-            date: String(g.date).slice(0, 10),
-            level: "CAMPAIGN",
-            externalId: id,
-            impressions: Number(g.impressions ?? 0),
-            clicks: Number(g.taps ?? 0),
-            spend: Number(g.localSpend?.amount ?? 0),
-            conversions: Number(g.installs ?? 0),
-            conversionValue: 0,
-            videoViews: 0,
-          });
-        }
+    const res = await this.call<{ data?: { reportingDataResponse?: { row?: Row[] } } }>("/reports/campaigns", auth, account, {
+      method: "POST",
+      body: {
+        startTime: range.from,
+        endTime: range.to,
+        granularity: "DAILY",
+        selector: { pagination: { offset: 0, limit: 1000 } },
+        returnRowTotals: false,
+        returnGrandTotals: false,
+      },
+    }).catch((err) => ({ data: { reportingDataResponse: { row: noRowsUnlessFatal<Row>(err) } } }));
+    const rows = res.data?.reportingDataResponse?.row ?? [];
+    const out: ExternalMetricRow[] = [];
+    for (const row of rows) {
+      const id = String(row.metadata?.campaignId);
+      for (const g of row.granularity ?? []) {
+        out.push({
+          date: String(g.date).slice(0, 10),
+          level: "CAMPAIGN",
+          externalId: id,
+          impressions: Number(g.impressions ?? 0),
+          clicks: Number(g.taps ?? 0),
+          spend: Number(g.localSpend?.amount ?? 0),
+          // v5 SpendRow: totalInstalls = tapInstalls + viewInstalls (there is no plain `installs`).
+          conversions: Number(g.totalInstalls ?? Number(g.tapInstalls ?? 0) + Number(g.viewInstalls ?? 0)),
+          conversionValue: 0,
+          videoViews: 0,
+        });
       }
-      return out;
-    } catch {
-      return [];
     }
+    return out;
   }
 
   async setCampaignStatus(auth: ConnectorAuth, account: AccountRef, campaign: { externalId: string }, status: "ACTIVE" | "PAUSED") {
@@ -172,7 +204,10 @@ export class AppleAdsConnector implements AdPlatformConnector {
   }
 
   private api(auth: ConnectorAuth, account: AccountRef): AppleApi {
-    return { send: (path, body) => this.call(path, auth, account, { method: "POST", body }) };
+    return {
+      send: (path, body) => this.call(path, auth, account, { method: "POST", body }),
+      put: (path, body) => this.call(path, auth, account, { method: "PUT", body }),
+    };
   }
 
   getBuilderOptions(): Promise<BuilderOptions> {
@@ -184,6 +219,31 @@ export class AppleAdsConnector implements AdPlatformConnector {
   }
 
   createCampaign(auth: ConnectorAuth, account: AccountRef & { currency: string }, draft: BuilderDraft, assets: Map<string, BuilderAsset>) {
-    return appleCreateCampaign(this.api(auth, account), draft, account.currency, assets);
+    return appleCreateCampaign(this.api(auth, account), draft, account.currency, assets, builderZone(account));
   }
+}
+
+/** Apple accepts client secrets valid for up to 180 days; ours are signed per token request, so one hour is plenty. */
+const CLIENT_SECRET_TTL_S = 60 * 60;
+
+/**
+ * The ES256 JWT Apple takes as client_secret, signed with the API user's private key.
+ * Docs: https://developer.apple.com/documentation/apple_ads/implementing-oauth-for-the-apple-search-ads-api
+ */
+export function appleClientSecret(keys: { clientId: string; teamId: string; keyId: string; privateKey: string }, now = Date.now()) {
+  let key;
+  try {
+    // A key pasted from a .env file may carry literal "\n" instead of line breaks.
+    key = createPrivateKey(keys.privateKey.replace(/\\n/g, "\n"));
+  } catch {
+    throw new ConnectorError("INVALID_REQUEST", "The Apple Ads private key isn't a valid PEM key. Paste the whole file, including the BEGIN and END lines.");
+  }
+  if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+    throw new ConnectorError("INVALID_REQUEST", "The Apple Ads private key must be an ES256 (P-256) key, as created with openssl ecparam -name prime256v1.");
+  }
+  const iat = Math.floor(now / 1000);
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const input = `${part({ alg: "ES256", kid: keys.keyId })}.${part({ sub: keys.clientId, aud: "https://appleid.apple.com", iat, exp: iat + CLIENT_SECRET_TTL_S, iss: keys.teamId })}`;
+  const signature = sign("sha256", Buffer.from(input), { key, dsaEncoding: "ieee-p1363" }).toString("base64url");
+  return `${input}.${signature}`;
 }

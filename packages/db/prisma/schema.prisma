@@ -129,7 +129,8 @@ model User {
   id              String    @id @default(cuid())
   name            String
   email           String    @unique
-  passwordHash    String
+  /// Null until an admin-created user sets one through their emailed link.
+  passwordHash    String?
   avatarUrl       String?
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?
@@ -145,6 +146,7 @@ model User {
   notifications       Notification[]
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]
+  emailVerifications  EmailVerificationToken[]
   invitationsSent     Invitation[]         @relation("InvitedBy")
   connectionsCreated  PlatformConnection[]
   auditLogs           AuditLog[]
@@ -182,6 +184,21 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+/// Emailed link that proves the user owns their address. Stored as a SHA-256 hash.
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
 }
 
 // ─────────────────────── Organizations & team ───────────────────────
@@ -228,6 +245,7 @@ model Organization {
   apiKeys       ApiKey[]
   aiLedger      AiTokenLedger[]
   aiOrders      AiTokenOrder[]
+  spendBudgets  SpendBudget[]
 
   @@map("organizations")
 }
@@ -321,6 +339,10 @@ model PlatformConnection {
   accessTokenEnc   String?
   /// AES-256-GCM encrypted
   refreshTokenEnc  String?
+  /// AES-256-GCM encrypted JSON of the organization's own API keys, for platforms
+  /// without a sign-in (Outbrain, The Trade Desk, Criteo, Apple Ads, Taboola).
+  /// Null on OAuth platforms and on the operator's own key-based connections.
+  credentialsEnc   String?
   tokenExpiresAt   DateTime?
   scopes           String[]
   status           ConnectionStatus @default(ACTIVE)
@@ -373,12 +395,16 @@ model AdAccount {
   status       String
   lastSyncedAt DateTime?
   meta         Json?
+  /// Billing as the platform last reported it (PlatformBillingDTO), for platforms that expose it
+  billing      Json?
+  billingFetchedAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   org        Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
   connection PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   workspace  Workspace?         @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  spendBudget SpendBudget?
   campaigns  Campaign[]
   adGroups   AdGroup[]
   ads        Ad[]
@@ -503,6 +529,15 @@ model MetricDaily {
 
 /// A lead captured by an ad platform's native form (Meta Instant Forms). Campaign and ad
 /// ids are plain strings on purpose: leads must outlive entities that later vanish from a sync.
+/// Where the team is with a lead.
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  WON
+  LOST
+}
+
 model Lead {
   id           String   @id @default(cuid())
   orgId        String
@@ -532,12 +567,20 @@ model Lead {
   /// When the person submitted the form (platform time)
   createdTime  DateTime
   createdAt    DateTime @default(now())
+  /// Follow-up workflow, set by the team in the app. Sync never writes these.
+  status          LeadStatus @default(NEW)
+  /// The team's note on the lead (up to 2,000 characters)
+  note            String?
+  /// Last time the status or note changed, and who changed it (a user id; kept when that user is deleted)
+  statusUpdatedAt   DateTime?
+  statusUpdatedById String?
 
   workspace  Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   connection PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, platform, externalId])
   @@index([workspaceId, createdTime])
+  @@index([workspaceId, status])
   @@index([campaignId])
   @@index([adId])
   @@map("leads")
@@ -750,6 +793,7 @@ model NotificationPreference {
   reportCopies Boolean  @default(true)
   lowAiBalance Boolean  @default(true)
   syncFailures Boolean  @default(true)
+  spendAlerts  Boolean  @default(true)
   updatedAt    DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -847,4 +891,48 @@ model PlatformSetting {
   updatedAt   DateTime @updatedAt
 
   @@map("platform_settings")
+}
+
+// ───────────────────────── Exchange rates ─────────────────────────
+
+/// Daily reference rates (European Central Bank, fetched through Frankfurter): 1 `base` = `rate` `quote`.
+/// Only days the ECB publishes are stored; weekends and holidays use the last published day.
+model ExchangeRate {
+  id        BigInt   @id @default(autoincrement())
+  date      DateTime @db.Date
+  base      String
+  quote     String
+  rate      Decimal  @db.Decimal(20, 10)
+  createdAt DateTime @default(now())
+
+  @@unique([date, base, quote])
+  @@index([base, quote, date])
+  @@map("exchange_rates")
+}
+
+/// A monthly spend budget for one ad account, set in Ashniva. Payment stays on the platform;
+/// this only alerts (and optionally pauses the account's campaigns) as the month's spend grows.
+model SpendBudget {
+  id           String    @id @default(cuid())
+  orgId        String
+  adAccountId  String    @unique
+  /// In the ad account's currency
+  monthlyLimit Decimal   @db.Decimal(14, 2)
+  alertPercent Int       @default(80)
+  pauseAtLimit Boolean   @default(false)
+  /// YYYY-MM the alerts below belong to; a new month starts again from 0
+  alertedMonth String?
+  /// 0 = none yet, 1 = alert percent reached, 2 = budget reached
+  alertedLevel Int       @default(0)
+  /// When campaigns were paused for reaching the budget (cleared in a new month)
+  pausedAt     DateTime?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  adAccount AdAccount    @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("spend_budgets")
 }

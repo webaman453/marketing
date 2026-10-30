@@ -10,7 +10,12 @@ const password = z
   .regex(/[0-9]/, "Password must contain a number");
 
 const name = z.string().trim().min(2, "Must be at least 2 characters").max(80);
-const email = z.email("Enter a valid email address").trim().toLowerCase();
+// Trim first: people paste emails with spaces and mobile autocomplete adds a trailing one.
+const email = z
+  .string({ error: "Enter a valid email address" })
+  .trim()
+  .toLowerCase()
+  .pipe(z.email("Enter a valid email address"));
 
 // ---------- Auth ----------
 const companyName = z.string().trim().min(2, "Enter your company name").max(80);
@@ -29,6 +34,9 @@ export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 
 export const resetPasswordSchema = z.object({ token: z.string().min(10), password });
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+export const verifyEmailSchema = z.object({ token: z.string().min(10) });
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 
 export const updateProfileSchema = z.object({ name });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

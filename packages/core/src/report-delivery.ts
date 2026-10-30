@@ -1,4 +1,5 @@
 import { prisma } from "@ashniva/db";
+import { isOrgLocked } from "./entitlements";
 import { esc, sendMail } from "./mailer";
 import { emailOptOuts } from "./notifications";
 import { renderReportPdf } from "./report-pdf";
@@ -17,9 +18,11 @@ async function wantedRecipients(orgId: string, recipients: string[]) {
 
 /** Emails a report's PDF to its recipients and schedules the next send. */
 export async function deliverReport(reportId: string) {
-  const report = await prisma.report.findUniqueOrThrow({ where: { id: reportId }, include: { workspace: true } });
+  const report = await prisma.report.findUniqueOrThrow({ where: { id: reportId }, include: { workspace: true, org: true } });
   const recipients = await wantedRecipients(report.orgId, report.recipients);
   try {
+    // Like syncs and rules: a lapsed organization's data is no longer synced, so its reports stop too.
+    if (isOrgLocked(report.org)) throw new Error("Organization is on an inactive plan; scheduled reports are paused.");
     if (recipients.length === 0) {
       // Everyone on the list opted out; nothing to send this time.
       await prisma.reportRun.create({ data: { reportId, status: "SUCCESS", recipients: [], error: "Skipped: every recipient turned off report emails." } });

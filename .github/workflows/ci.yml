@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, testing]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ashniva
+          POSTGRES_PASSWORD: ashniva
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ashniva"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      # Only used to generate the Prisma client; tests use TEST_DATABASE_URL.
+      DATABASE_URL: postgresql://ashniva:ashniva@127.0.0.1:5432/ashniva_ci
+      TEST_DATABASE_URL: postgresql://ashniva:ashniva@127.0.0.1:5432/ashniva_test
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
+      TURBO_TELEMETRY_DISABLED: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - name: Unit, web and connector tests
+        run: pnpm test
+      - name: Integration tests (Postgres + Redis)
+        run: pnpm test:integration
+      - name: Build
+        run: pnpm build
+        env:
+          API_URL: http://localhost:4100

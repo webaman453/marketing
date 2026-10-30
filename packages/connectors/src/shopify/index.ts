@@ -3,10 +3,11 @@
  * event (UTM, budget, landing page). Shopify does not serve the ad.
  * Docs: https://shopify.dev/docs/apps/build/authentication-authorization
  */
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { BuilderDraft } from "@ashniva/shared";
 import { budgetOf, str } from "../builder-values";
 import { ConnectorError } from "../errors";
-import { requestJson, type RequestOptions } from "../http";
+import { allPages, nextLink, requestJson, requestWithHeaders, type RequestOptions } from "../http";
 import { apiError, formToken } from "../oauth-flow";
 import { accountTree } from "../tree";
 import type { AccountRef, AccountStructure, AdPlatformConnector, BuilderAsset, ConnectorAuth, EntityStatus, ExternalAdAccount, ExternalMetricRow, OAuthTokens } from "../types";
@@ -27,6 +28,25 @@ export function shopifyShop(raw: string) {
     throw new ConnectorError("INVALID_REQUEST", "Enter the store domain, like your-store.myshopify.com.");
   }
   return shop;
+}
+
+/**
+ * Checks the `hmac` Shopify adds to the OAuth callback query: HMAC-SHA256 of the
+ * other params, sorted and joined as k=v&…, keyed with the app secret.
+ */
+export function verifyShopifyHmac(query: Record<string, unknown>, secret: string) {
+  const given = typeof query.hmac === "string" ? query.hmac : "";
+  const message = Object.keys(query)
+    .filter((k) => k !== "hmac" && k !== "signature")
+    .sort()
+    .map((k) => `${k}=${Array.isArray(query[k]) ? (query[k] as unknown[]).join(",") : String(query[k])}`)
+    .join("&");
+  const expected = createHmac("sha256", secret).update(message).digest("hex");
+  // Compare bytes: a forged value with multi-byte characters can match the string length but not
+  // the byte length, and timingSafeEqual throws on unequal lengths.
+  const a = Buffer.from(given, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function pack(shop: string, token: string) {
@@ -87,8 +107,15 @@ export class ShopifyConnector implements AdPlatformConnector {
     return u.toString();
   }
 
-  async exchangeCode({ code, redirectUri, state }: { code: string; redirectUri: string; state?: string }): Promise<OAuthTokens> {
+  /**
+   * The API passes the raw callback query, so the `hmac` Shopify signs it with is
+   * checked here; the signed state already pins the shop.
+   */
+  async exchangeCode({ code, redirectUri, state, query }: { code: string; redirectUri: string; state?: string; query?: Record<string, unknown> }): Promise<OAuthTokens> {
     this.assertConfigured();
+    if (query && !verifyShopifyHmac(query, this.config.clientSecret!)) {
+      throw new ConnectorError("INVALID_REQUEST", "Shopify's sign-in reply failed its signature check. Start Connect again.");
+    }
     const shop = shopFromState(state ?? "");
     const tokens = await formToken(`https://${shop}/admin/oauth/access_token`, {
       client_id: this.config.clientId!,
@@ -143,8 +170,14 @@ export class ShopifyConnector implements AdPlatformConnector {
   }
 
   async fetchStructure(auth: ConnectorAuth, _account: AccountRef): Promise<AccountStructure> {
-    const res = await this.admin<{ marketing_events?: Row[] }>(auth, "marketing_events.json", { query: { limit: 250 } });
-    const trees = (res.marketing_events ?? []).map((event) => this.eventTree(event));
+    const { shop, token } = unpack(auth.accessToken);
+    const first = `https://${shop}/admin/api/${API_VERSION}/marketing_events.json?limit=250`;
+    // Pages are linked with Link: <…page_info…>; rel="next".
+    const events = await allPages<Row, string>(first, async (url) => {
+      const { data, headers } = await requestWithHeaders<{ marketing_events?: Row[] }>(url, { headers: { "X-Shopify-Access-Token": token } }, apiError("Shopify"));
+      return { items: data?.marketing_events ?? [], next: nextLink(headers.get("link")) };
+    }, "Shopify marketing event list");
+    const trees = events.map((event) => this.eventTree(event));
     return {
       campaigns: trees.flatMap((t) => t.campaigns),
       adGroups: trees.flatMap((t) => t.adGroups),
@@ -177,7 +210,11 @@ export class ShopifyConnector implements AdPlatformConnector {
     const ad = adNode?.values ?? {};
     const paused = c.launchStatus !== "ACTIVE";
     const budget = budgetOf(c);
+    // A marketing event only records the ad and has no paused state. "Create paused" is
+    // "Record as ended" in the form: the event ends when it starts, so a later sync reads it
+    // as paused (ended_at in the past), the same as setCampaignStatus(PAUSED) does.
     const started = new Date().toISOString();
+    const endedAt = paused ? started : undefined;
     const url = str(ad, "url");
     let referring: string | undefined;
     try {
@@ -193,13 +230,13 @@ export class ShopifyConnector implements AdPlatformConnector {
           marketing_channel: String(draft.setup.channel || "social"),
           paid: true,
           started_at: started,
-          ended_at: paused ? started : undefined,
+          ended_at: endedAt,
           budget: budget ? budget.amount.toFixed(2) : undefined,
           budget_type: budget?.lifetime ? "lifetime" : "daily",
           currency: account.currency,
           utm_campaign: str(c, "name").slice(0, 255),
-          utm_source: str(c, "utmSource"),
-          utm_medium: str(c, "utmMedium"),
+          utm_source: str(c, "utmSource") || undefined,
+          utm_medium: str(c, "utmMedium") || undefined,
           description: str(ad, "description") || str(c, "name"),
           referring_domain: referring,
         },
@@ -215,7 +252,8 @@ export class ShopifyConnector implements AdPlatformConnector {
       budget: budget && !budget.lifetime ? budget.amount : null,
       description: str(ad, "description"),
       referring_domain: referring,
-      ended_at: paused ? started : null,
+      started_at: started,
+      ended_at: endedAt ?? null,
     }, status);
     if (group && tree.adGroups[0]) tree.adGroups[0].sourceKey = group.key;
     if (adNode && tree.ads[0]) tree.ads[0].sourceKey = adNode.key;

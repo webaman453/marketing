@@ -25,16 +25,34 @@ import { cn } from "@/lib/utils";
 import { BudgetDialog } from "./budget-dialog";
 import { useBulkCampaignStatus, useSetCampaignStatus } from "./use-campaign-actions";
 
+/**
+ * A metric column. Rows show what each account bills in; sorting uses the workspace-currency
+ * value so campaigns in different currencies rank correctly. Money columns (`workspaceCurrency`
+ * given) add a "≈ $1,234" line for rows converted from another currency.
+ */
 const metric = (
   key: keyof MetricSet,
   header: string,
   render: (v: number | null, c: string) => string,
   className?: string,
+  workspaceCurrency?: string,
 ): ColumnDef<CampaignRowDTO> => ({
   id: key,
-  accessorFn: (r) => r.metrics[key] ?? -1,
+  accessorFn: (r) => (r.converted ?? r.metrics)[key] ?? -1,
   header,
-  cell: ({ row }) => render(row.original.metrics[key] as number | null, row.original.currency),
+  cell: ({ row }) => {
+    const r = row.original;
+    const own = render(r.metrics[key] as number | null, r.currency);
+    if (!workspaceCurrency || !r.converted) return own;
+    return (
+      <div className="leading-tight">
+        <div>{own}</div>
+        <div className="text-[11px] font-normal text-muted-foreground" title={`In ${workspaceCurrency} at daily ECB rates`}>
+          ≈ {render(r.converted[key] as number | null, workspaceCurrency)}
+        </div>
+      </div>
+    );
+  },
   meta: { align: "right", className },
   sortDescFirst: true,
 });
@@ -155,15 +173,15 @@ export function CampaignsTable({
         },
         meta: { align: "right" },
       },
-      metric("spend", "Spend", (v, c) => money(v, c)),
-      metric("impressions", "Impr.", (v) => number(v), IMPR_CLASS),
-      metric("clicks", "Clicks", (v) => number(v)),
+      metric("spend", "Spend", (v, c) => money(v, c), undefined, currency),
+      metric("impressions", "Impr.", (v) => number(v, { currency }), IMPR_CLASS),
+      metric("clicks", "Clicks", (v) => number(v, { currency })),
       metric("ctr", "CTR", (v) => percent(v)),
-      metric("conversions", "Conv.", (v) => number(v, { decimals: 1 })),
-      metric("cpa", "Cost / conv.", (v, c) => money(v, c, { decimals: 0 })),
+      metric("conversions", "Conv.", (v) => number(v, { decimals: 1, currency })),
+      metric("cpa", "Cost / conv.", (v, c) => money(v, c, { decimals: 0 }), undefined, currency),
       metric("roas", "ROAS", (v) => multiple(v)),
     ],
-    [canEdit, setStatus],
+    [canEdit, setStatus, currency],
   );
 
   const table = useReactTable({
@@ -262,10 +280,10 @@ export function CampaignsTable({
               <TableCell />
               <TableCell />
               <TableCell className="text-right font-semibold tabular">{money(totals.spend, currency)}</TableCell>
-              <TableCell className={cn("text-right tabular", IMPR_CLASS)}>{number(totals.impressions)}</TableCell>
-              <TableCell className="text-right tabular">{number(totals.clicks)}</TableCell>
+              <TableCell className={cn("text-right tabular", IMPR_CLASS)}>{number(totals.impressions, { currency })}</TableCell>
+              <TableCell className="text-right tabular">{number(totals.clicks, { currency })}</TableCell>
               <TableCell className="text-right tabular">{percent(totals.ctr)}</TableCell>
-              <TableCell className="text-right tabular">{number(totals.conversions, { decimals: 1 })}</TableCell>
+              <TableCell className="text-right tabular">{number(totals.conversions, { decimals: 1, currency })}</TableCell>
               <TableCell className="text-right tabular">{money(totals.cpa, currency, { decimals: 0 })}</TableCell>
               <TableCell className="pr-4 text-right font-semibold tabular">{multiple(totals.roas)}</TableCell>
             </TableRow>

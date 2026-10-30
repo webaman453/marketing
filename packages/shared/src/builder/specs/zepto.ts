@@ -64,4 +64,5 @@ export const zeptoSpec: PlatformBuilderSpec = {
   maxAdGroups: 10,
   maxAds: 20,
   previews: () => ["google_display"],
+  apiCreatable: () => "Zepto has no public ads API, so campaigns can't be published from here yet.",
 };

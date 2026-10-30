@@ -21,7 +21,10 @@ ENV API_URL=$API_URL
 RUN pnpm turbo run build
 
 FROM base AS runtime
-ENV NODE_ENV=production
+# .env is not in the image (compose injects env_file) and services run from
+# apps/*, so tell the code where the repo is: report PDF fonts and relative
+# paths such as UPLOAD_DIR resolve against it.
+ENV NODE_ENV=production REPO_ROOT=/app
 COPY --from=build /app /app
 # Uploaded creatives and logos (mount a volume here).
 RUN mkdir -p /data/uploads

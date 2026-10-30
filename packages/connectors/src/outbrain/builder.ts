@@ -19,7 +19,8 @@ export async function outbrainCreateCampaign(api: OutbrainApi, marketerId: strin
     name: str(c, "name"),
     enabled: status === "ACTIVE",
     budget: { amount: budget?.amount ?? 1, type: budget?.lifetime ? "LIFETIME" : "DAILY" },
-    cpc: str(c, "bidType") === "CPM" ? undefined : Number(c.cpc ?? 0.3),
+    // The form keeps one bid under `cpc`; its meaning follows bidType.
+    ...(str(c, "bidType") === "CPM" ? { bidType: "CPM", cpm: Number(c.cpc ?? 1) } : { cpc: Number(c.cpc ?? 0.3) }),
     objective: String(draft.setup.objective || "Traffic"),
     targeting: { country: countries },
   });

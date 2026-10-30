@@ -36,6 +36,8 @@ export function KpiCard({
     () => series.map((p) => ({ date: p.date, v: (deriveMetrics(p)[metric] as number | null) ?? 0 })),
     [series, metric],
   );
+  // One point draws a lone dot and all-zero data a flat line; neither says anything.
+  const showSpark = spark.length >= 2 && spark.some((p) => p.v !== 0);
 
   return (
     <Card className={cn("gap-0 overflow-hidden p-0 animate-fade-up", className)} style={style}>
@@ -62,27 +64,30 @@ export function KpiCard({
           vs {def.short(previous[metric] as number | null, currency)} previous period
         </div>
       </div>
-      <div className="mt-3 h-12">
+      {/* The strip keeps its height when there's no sparkline, so cards in a row line up. */}
+      <div className="mt-3 h-12" data-testid="kpi-spark">
         {/* A non-zero first size avoids recharts warning before the container is measured. */}
-        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 240, height: 48 }}>
-          <AreaChart data={spark} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.22} />
-                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <Area
-              type="monotone"
-              dataKey="v"
-              stroke="var(--chart-1)"
-              strokeWidth={1.5}
-              fill={`url(#${gradientId})`}
-              isAnimationActive={false}
-              dot={false}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+        {showSpark && (
+          <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 240, height: 48 }}>
+            <AreaChart data={spark} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.22} />
+                  <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <Area
+                type="monotone"
+                dataKey="v"
+                stroke="var(--chart-1)"
+                strokeWidth={1.5}
+                fill={`url(#${gradientId})`}
+                isAnimationActive={false}
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </Card>
   );

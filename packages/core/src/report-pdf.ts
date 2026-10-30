@@ -3,11 +3,13 @@
  */
 import path from "node:path";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import PDFDocument from "pdfkit";
 import {
   DIMENSION_LABELS,
   LOWER_IS_BETTER,
   METRIC_FORMATS,
+  fxNote,
   PLATFORM_INFO,
   percentChange,
   type MetricKey,
@@ -23,12 +25,43 @@ const LINE = "#e5e7eb";
 const GOOD = "#15803d";
 const BAD = "#b91c1c";
 
-function fontDir() {
-  const candidates = [
-    path.resolve(process.env.REPO_ROOT || process.cwd(), "packages/core/assets/fonts"),
-    path.resolve(process.cwd(), "assets/fonts"),
-  ];
-  return candidates.find((d) => existsSync(path.join(d, "Inter-Regular.ttf"))) ?? candidates[0]!;
+const FONT_FILES = ["Inter-Regular.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"] as const;
+const FONT_SUBDIRS = [path.join("packages", "core", "assets", "fonts"), path.join("assets", "fonts")];
+
+/** This module's own directory: packages/core/src in dev, apps/<app>/dist once bundled. */
+function moduleDir(): string | null {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Finds the bundled Inter fonts. Walks up from REPO_ROOT, the working directory
+ * and this module's directory, so it works from the repo root, from
+ * apps/api or apps/worker (Docker sets those as working_dir and has no .env),
+ * and from a bundled dist/. Throws a clear error rather than letting pdfkit
+ * fail later with a bare ENOENT.
+ */
+export function reportFontDir(): string {
+  const starts = [process.env.REPO_ROOT, process.cwd(), moduleDir()].filter((s): s is string => Boolean(s));
+  const tried = new Set<string>();
+  for (const start of starts) {
+    for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
+      for (const sub of FONT_SUBDIRS) {
+        const candidate = path.join(dir, sub);
+        if (tried.has(candidate)) continue;
+        tried.add(candidate);
+        if (FONT_FILES.every((f) => existsSync(path.join(candidate, f)))) return candidate;
+      }
+      if (path.dirname(dir) === dir) break;
+    }
+  }
+  throw new Error(
+    `Report PDF fonts (${FONT_FILES.join(", ")}) not found in packages/core/assets/fonts above ${starts.join(", ")}. ` +
+      "Make sure that folder ships with the app, or set REPO_ROOT to the repository root.",
+  );
 }
 
 async function loadLogo(url: string | null): Promise<Buffer | null> {
@@ -56,7 +89,7 @@ export async function renderReportPdf(r: ReportResult): Promise<Buffer> {
   const metrics = r.config.metrics;
   const landscape = metrics.length > 5;
   const doc = new PDFDocument({ size: "A4", layout: landscape ? "landscape" : "portrait", margin: 40, bufferPages: true, info: { Title: r.name, Author: r.branding.name } });
-  const dir = fontDir();
+  const dir = reportFontDir();
   doc.registerFont("R", path.join(dir, "Inter-Regular.ttf"));
   doc.registerFont("S", path.join(dir, "Inter-SemiBold.ttf"));
   doc.registerFont("B", path.join(dir, "Inter-Bold.ttf"));
@@ -89,6 +122,8 @@ export async function renderReportPdf(r: ReportResult): Promise<Buffer> {
   if (r.compareRange) {
     doc.font("R").fontSize(9).fillColor(MUTED).text(`Compared with ${r.compareRange.from} → ${r.compareRange.to}`, { width: inner });
   }
+  const fxLine = fxNote(r.fx);
+  if (fxLine) doc.font("R").fontSize(8).fillColor(MUTED).text(`Amounts in ${r.currency}. ${fxLine}`, { width: inner });
 
   // ── KPI tiles ──
   const kpis = metrics.slice(0, landscape ? 6 : 6);

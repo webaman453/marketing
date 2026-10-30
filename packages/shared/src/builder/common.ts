@@ -102,7 +102,10 @@ export const scheduleFields = (opts: { endRequired?: Condition; datetime?: boole
   },
 ];
 
-export const launchSection = (): Section => ({
+/** Pass copy overrides for platforms where "approves the ads" doesn't fit (e.g. Shopify). */
+export const launchSection = (
+  copy: { paused?: { label?: string; description?: string }; active?: { label?: string; description?: string } } = {},
+): Section => ({
   id: "publish",
   title: "When it's published",
   fields: [
@@ -111,8 +114,8 @@ export const launchSection = (): Section => ({
       type: "radio",
       label: "Status after publishing",
       options: [
-        { value: "PAUSED", label: "Create paused", description: "Check it on the platform, then switch it on here. Recommended." },
-        { value: "ACTIVE", label: "Start delivering", description: "Goes live as soon as the platform approves the ads." },
+        { value: "PAUSED", label: copy.paused?.label ?? "Create paused", description: copy.paused?.description ?? "Check it on the platform, then switch it on here. Recommended." },
+        { value: "ACTIVE", label: copy.active?.label ?? "Start delivering", description: copy.active?.description ?? "Goes live as soon as the platform approves the ads." },
       ],
       default: "PAUSED",
     },

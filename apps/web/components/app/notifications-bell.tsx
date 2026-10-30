@@ -1,8 +1,10 @@
 "use client";
 
+import type { NotificationDTO } from "@ashniva/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bell, Bot, CheckCheck, Plug } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,25 +12,45 @@ import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { qk2, useNotifications } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "./workspace-context";
 
 const ICONS: Record<string, typeof Bell> = {
   "rule.triggered": Bot,
   "integration.expired": Plug,
 };
 
+type NotificationList = { unread: number; items: NotificationDTO[] };
+
+/** The bell in the app header. Shows the current organization's notifications only. */
 export function NotificationsBell() {
-  const { data } = useNotifications();
+  const { org } = useWorkspace();
+  const { data } = useNotifications(org.id);
   const queryClient = useQueryClient();
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const unread = data?.unread ?? 0;
+  const queryKey = [...qk2.notifications, org.id];
 
-  async function markAll() {
-    await api("/notifications/read", { method: "POST", body: {} }).catch(() => undefined);
+  /** Shows the given notifications (all when omitted) as read right away, then saves that. */
+  async function markRead(ids?: string[]) {
+    await queryClient.cancelQueries({ queryKey });
+    const now = new Date().toISOString();
+    queryClient.setQueryData<NotificationList>(queryKey, (prev) => {
+      if (!prev) return prev;
+      let marked = 0;
+      const items = prev.items.map((n) => {
+        if (n.readAt || (ids && !ids.includes(n.id))) return n;
+        marked++;
+        return { ...n, readAt: now };
+      });
+      return { items, unread: ids ? Math.max(0, prev.unread - marked) : 0 };
+    });
+    await api("/notifications/read", { method: "POST", body: ids ? { ids } : { orgId: org.id } }).catch(() => undefined);
     void queryClient.invalidateQueries({ queryKey: qk2.notifications });
   }
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" className="relative text-muted-foreground" aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}>
           <Bell />
@@ -43,7 +65,7 @@ export function NotificationsBell() {
         <div className="flex items-center justify-between border-b px-4 py-3">
           <span className="text-sm font-semibold">Notifications</span>
           {unread > 0 && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={markAll}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => void markRead()}>
               <CheckCheck /> Mark all read
             </Button>
           )}
@@ -63,12 +85,12 @@ export function NotificationsBell() {
                   <li key={n.id}>
                     <button
                       className={cn("flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60", !n.readAt && "bg-primary/[0.03]")}
-                      onClick={async () => {
-                        if (!n.readAt) {
-                          await api("/notifications/read", { method: "POST", body: { ids: [n.id] } }).catch(() => undefined);
-                          void queryClient.invalidateQueries({ queryKey: qk2.notifications });
+                      onClick={() => {
+                        if (!n.readAt) void markRead([n.id]);
+                        if (n.link) {
+                          setOpen(false);
+                          router.push(n.link);
                         }
-                        if (n.link) router.push(n.link);
                       }}
                     >
                       <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border bg-card">

@@ -8,8 +8,8 @@
  * structural characters ( ) : , must not be percent-encoded.
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
-import { ConnectorError } from "../errors";
-import { codeFromStatus, requestJson, type RequestOptions } from "../http";
+import { ConnectorError, expiredGrant, noRowsUnlessFatal } from "../errors";
+import { allPages, codeFromStatus, requestJson, type RequestOptions } from "../http";
 import type {
   AccountRef,
   AccountStructure,
@@ -91,15 +91,22 @@ export class LinkedInConnector implements AdPlatformConnector {
     );
   }
 
-  private async all(path: string, auth: ConnectorAuth) {
-    const out: Row[] = [];
+  /**
+   * Reads a search/criteria finder to its last page. Since 202401 these page by cursor:
+   * pageSize + pageToken in, metadata.nextPageToken out (no token = last page); start/count
+   * are no longer paging parameters. Capped at MAX_PAGES like every list.
+   */
+  private all(path: string, auth: ConnectorAuth, pageSize = 500) {
     const sep = path.includes("?") ? "&" : "?";
-    for (let start = 0; ; start += 500) {
-      const res = await this.rest<{ elements?: Row[] }>(`${path}${sep}start=${start}&count=500`, auth);
-      const els = res.elements ?? [];
-      out.push(...els);
-      if (els.length < 500) return out;
-    }
+    return allPages<Row, string | undefined>(
+      undefined,
+      async (pageToken) => {
+        const token = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+        const res = await this.rest<{ elements?: Row[]; metadata?: { nextPageToken?: string } }>(`${path}${sep}pageSize=${pageSize}${token}`, auth);
+        return { items: res.elements ?? [], next: res.metadata?.nextPageToken };
+      },
+      `LinkedIn ${path.split("?")[0]} list`,
+    );
   }
 
   getAuthUrl({ state, redirectUri }: { state: string; redirectUri: string }) {
@@ -136,15 +143,21 @@ export class LinkedInConnector implements AdPlatformConnector {
   }
 
   refreshTokens(refreshToken: string) {
-    return this.token({ grant_type: "refresh_token", refresh_token: refreshToken });
+    // A revoked or expired refresh token is 400 invalid_grant: an expired login, not a bad request.
+    return this.token({ grant_type: "refresh_token", refresh_token: refreshToken }).catch(expiredGrant);
   }
 
-  async getUser(auth: ConnectorAuth) {
-    const info = await requestJson<{ sub: string; name?: string; email?: string }>(
+  /** OpenID userinfo; it lives at /v2/userinfo, not under the versioned /rest API. */
+  private getUserinfo(auth: ConnectorAuth) {
+    return requestJson<{ sub: string; name?: string; email?: string }>(
       "https://api.linkedin.com/v2/userinfo",
       { headers: { Authorization: `Bearer ${auth.accessToken}` } },
       this.mapError,
     );
+  }
+
+  async getUser(auth: ConnectorAuth) {
+    const info = await this.getUserinfo(auth);
     return { id: info.sub, name: info.name ?? info.email ?? "LinkedIn user" };
   }
 
@@ -170,7 +183,9 @@ export class LinkedInConnector implements AdPlatformConnector {
     const [groups, campaigns, creatives] = await Promise.all([
       this.all(`/adAccounts/${id}/adCampaignGroups?q=search`, auth),
       this.campaignsOf(auth, id),
-      this.all(`/adAccounts/${id}/creatives?q=criteria`, auth).catch(() => [] as Row[]),
+      // Creatives page at most 100 per request. A creative list the account cannot run gives no
+      // ads, but an expired login, rate limit or outage still fails the sync.
+      this.all(`/adAccounts/${id}/creatives?q=criteria`, auth, 100).catch(noRowsUnlessFatal<Row>),
     ]);
     const groupOfCampaign = new Map(campaigns.map((c) => [String(c.id), idFromUrn(c.campaignGroup)]));
 
@@ -229,7 +244,7 @@ export class LinkedInConnector implements AdPlatformConnector {
 
     const [byCampaign, byCreative, campaigns] = await Promise.all([
       this.rest<{ elements?: Row[] }>(query("CAMPAIGN"), auth),
-      this.rest<{ elements?: Row[] }>(query("CREATIVE"), auth).catch(() => ({ elements: [] as Row[] })),
+      this.rest<{ elements?: Row[] }>(query("CREATIVE"), auth).catch((err) => ({ elements: noRowsUnlessFatal<Row>(err) })),
       this.campaignsOf(auth, account.externalId),
     ]);
     const groupOf = new Map(campaigns.map((c) => [String(c.id), idFromUrn(c.campaignGroup)]));
@@ -306,6 +321,10 @@ export class LinkedInConnector implements AdPlatformConnector {
     return {
       get: (pathAndQuery) => this.rest(pathAndQuery, auth),
       post: async (pathAndQuery, body) => (await send(pathAndQuery, { method: "POST", body })).body as never,
+      putJson: async (pathAndQuery, body) => {
+        await send(pathAndQuery, { method: "PUT", body });
+      },
+      userinfo: () => this.getUserinfo(auth),
       create: async (pathAndQuery, body) => {
         const { res, body: out } = await send(pathAndQuery, { method: "POST", body });
         const id = res.headers.get("x-restli-id") ?? (out?.value?.creative as string | undefined) ?? (out?.id as string | undefined);

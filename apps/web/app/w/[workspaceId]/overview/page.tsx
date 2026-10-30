@@ -7,6 +7,7 @@ import { DateRangePicker } from "@/components/app/date-range-picker";
 import { PageHeader } from "@/components/app/page-header";
 import { ErrorState } from "@/components/app/states";
 import { useWorkspace } from "@/components/app/workspace-context";
+import { FxNote } from "@/components/campaigns/fx-note";
 import { AiInsights } from "@/components/dashboard/ai-insights";
 import { GetStarted } from "@/components/dashboard/get-started";
 import { KpiCard, KpiCardSkeleton } from "@/components/dashboard/kpi-card";
@@ -29,6 +30,9 @@ const KPIS = [
   { metric: "cpc", hint: "Average cost per click." },
   { metric: "impressions", hint: "Number of times your ads were shown." },
 ] as const;
+
+/** The API sends its top six by spend; hidden platforms are dropped here too, in case any slip through. */
+const TOP_CAMPAIGNS = 6;
 
 export default function OverviewPage() {
   const { workspace } = useWorkspace();
@@ -70,6 +74,7 @@ export default function OverviewPage() {
               />
             ))}
           </div>
+          <FxNote fx={data.fx} className="-mt-3" />
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
             <PerformanceChart series={data.timeseries} currency={data.currency} />
@@ -78,7 +83,7 @@ export default function OverviewPage() {
 
           <AiInsights />
 
-          <TopCampaigns campaigns={data.topCampaigns.filter((campaign) => isPlatformShown(campaign.platform))} workspaceId={workspace.id} currency={data.currency} />
+          <TopCampaigns campaigns={data.topCampaigns.filter((campaign) => isPlatformShown(campaign.platform)).slice(0, TOP_CAMPAIGNS)} workspaceId={workspace.id} currency={data.currency} />
         </div>
       )}
     </div>

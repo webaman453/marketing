@@ -8,8 +8,10 @@ import {
   PLATFORM_INFO,
   draftMediaIds,
   isBuilderDraft,
+  isPlatformShown,
   previewValues,
   validateDraft,
+  visibleDraft,
   type AdPreviewData,
   type BuilderDraft,
   type BuilderIssue,
@@ -24,12 +26,20 @@ import { audit } from "./audit";
 import { connectors } from "./connectors";
 import { getFile } from "./storage";
 import { upsertStructure } from "./sync";
-import { getAccessToken } from "./tokens";
+import { getConnectorAuth } from "./tokens";
 
 export class DraftInvalidError extends Error {
   constructor(public readonly issues: BuilderIssue[]) {
     super(issues[0]?.message ?? "The campaign isn't complete yet.");
     this.name = "DraftInvalidError";
+  }
+}
+
+/** Another request is launching (or has launched) this draft. */
+export class DraftAlreadyLaunchedError extends Error {
+  constructor() {
+    super("This campaign has already been launched.");
+    this.name = "DraftAlreadyLaunchedError";
   }
 }
 
@@ -44,6 +54,7 @@ export async function inspectDraft(workspaceId: string, payload: unknown) {
   ]);
   const media = new Map<string, MediaInfo>(creatives.map((c) => [c.id, { type: c.type, width: c.width, height: c.height }]));
   const issues = validateDraft(spec, draft, media);
+  if (!isPlatformShown(draft.platform)) issues.unshift({ level: "setup", message: `${PLATFORM_INFO[draft.platform].name} isn't available.` });
   if (!account) issues.unshift({ level: "setup", message: "The ad account for this draft is no longer in this workspace." });
   else if (account.platform !== draft.platform) issues.unshift({ level: "setup", message: "The ad account doesn't match the draft's platform." });
   else if (account.connection.status === "REVOKED") issues.unshift({ level: "setup", message: `${PLATFORM_INFO[account.platform].name} is disconnected. Reconnect it on the Integrations page.` });
@@ -72,19 +83,28 @@ export async function launchDraft(draftId: string, userId: string) {
   const { draft, spec, account, creatives, issues } = await inspectDraft(row.workspaceId, row.payload);
   if (issues.length || !account) throw new DraftInvalidError(issues);
 
-  const connector = connectors().get(account.platform, account.connection.mode);
+  let connector: ReturnType<ReturnType<typeof connectors>["get"]>;
+  try {
+    connector = connectors().get(account.platform, account.connection.mode);
+  } catch {
+    throw new DraftInvalidError([{ level: "setup", message: `Creating ${PLATFORM_INFO[account.platform].name} campaigns isn't available yet.` }]);
+  }
   if (!connector.createCampaign) throw new DraftInvalidError([{ level: "setup", message: `Creating ${PLATFORM_INFO[account.platform].name} campaigns isn't available yet.` }]);
   if (account.connection.mode === "LIVE") {
     const creatable = spec.apiCreatable?.(draft.setup) ?? true;
     if (creatable !== true) throw new DraftInvalidError([{ level: "setup", message: typeof creatable === "string" ? creatable : "This campaign type can't be created through the platform's API." }]);
   }
 
-  await prisma.campaignDraft.update({ where: { id: draftId }, data: { status: "LAUNCHING" } });
+  // Claim the draft atomically: of several concurrent launches (a double click) only one may create the campaign.
+  const claimed = await prisma.campaignDraft.updateMany({ where: { id: draftId, status: { notIn: ["LAUNCHING", "LAUNCHED"] } }, data: { status: "LAUNCHING" } });
+  if (claimed.count === 0) throw new DraftAlreadyLaunchedError();
   const base = { adAccountId: account.id, platform: account.platform };
 
   try {
-    const auth = { accessToken: await getAccessToken(account.connection) };
-    const ref = { externalId: account.externalId, currency: account.currency, timezone: account.timezone, meta: account.meta as Record<string, unknown> | null };
+    const auth = await getConnectorAuth(account.connection);
+    // Builder dates and times are wall-clock values in the ad account's zone (the workspace's when the account doesn't report one).
+    const timezone = account.timezone || row.workspace.timezone || "UTC";
+    const ref = { externalId: account.externalId, currency: account.currency, timezone, meta: account.meta as Record<string, unknown> | null };
 
     const assets = new Map<string, BuilderAsset>(
       creatives.map((c) => {
@@ -114,7 +134,8 @@ export async function launchDraft(draftId: string, userId: string) {
       }),
     );
 
-    const structure = await connector.createCampaign(auth, ref, draft, assets);
+    // Only what the form shows goes to the platform; hidden fields can hold stale values.
+    const structure = await connector.createCampaign(auth, ref, visibleDraft(spec, draft), assets);
     const isDemo = account.connection.mode === "DEMO";
     const ids = await upsertStructure(account, structure, isDemo);
     const created = structure.campaigns[0]!;

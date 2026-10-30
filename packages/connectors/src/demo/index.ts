@@ -6,15 +6,16 @@
 import {
   addDays,
   eachDay,
-  toISODate,
   type BuilderDraft,
   type BuilderOptions,
   type Platform,
   type TargetingKind,
   type TargetingSearchResult,
 } from "@ashniva/shared";
+import { builderZone, dayIn } from "../builder-values";
 import { ConnectorError } from "../errors";
 import type {
+  AccountBilling,
   AccountRef,
   AccountStructure,
   AdPlatformConnector,
@@ -23,38 +24,14 @@ import type {
   OAuthTokens,
 } from "../types";
 import { demoBuilderOptions, demoCreateCampaign, demoSearchTargeting } from "./builder";
-import { DEMO_ACCOUNTS, type DemoAccountSpec, type DemoCampaignSpec } from "./catalog";
+import { DEMO_ACCOUNTS, demoIds as ids, type DemoAccountSpec, type DemoCampaignSpec } from "./catalog";
+import { DEMO_LEAD_DAYS, generateDemoLeads } from "./leads";
+import { between } from "./random";
 
 export { DEMO_ACCOUNTS } from "./catalog";
 
 /** Platforms that have sample data. */
 export const DEMO_PLATFORMS = Object.keys(DEMO_ACCOUNTS) as Platform[];
-
-// ── deterministic randomness ──
-function hash(str: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-/** Uniform number in [0, 1) derived from the key. */
-const rand = (key: string) => {
-  let t = (hash(key) + 0x6d2b79f5) | 0;
-  t = Math.imul(t ^ (t >>> 15), t | 1);
-  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
-
-const between = (key: string, min: number, max: number) => min + rand(key) * (max - min);
-
-const ids = (account: DemoAccountSpec, c: DemoCampaignSpec) => ({
-  campaign: `${account.externalId}-${c.key}`,
-  group: (gi: number) => `${account.externalId}-${c.key}-g${gi}`,
-  ad: (gi: number, ai: number) => `${account.externalId}-${c.key}-g${gi}-a${ai}`,
-});
 
 function findAccount(externalId: string): DemoAccountSpec {
   const acc = Object.values(DEMO_ACCOUNTS).find((a) => a?.externalId === externalId);
@@ -117,9 +94,14 @@ function split(total: DayMetrics, weights: number[]): DayMetrics[] {
   return parts;
 }
 
+/** Today's calendar day in the ad account's zone: report dates are account-local (ExternalMetricRow.date). */
+function accountToday(account: { timezone?: string | null }, now = new Date()) {
+  return dayIn(now, builderZone(account));
+}
+
 export function generateDemoStructure(accountExternalId: string): AccountStructure {
   const account = findAccount(accountExternalId);
-  const today = toISODate(new Date());
+  const today = accountToday(account);
   const structure: AccountStructure = { campaigns: [], adGroups: [], ads: [] };
 
   for (const c of account.campaigns) {
@@ -169,7 +151,7 @@ export function generateDemoStructure(accountExternalId: string): AccountStructu
 
 export function generateDemoMetrics(accountExternalId: string, range: { from: string; to: string }): ExternalMetricRow[] {
   const account = findAccount(accountExternalId);
-  const today = toISODate(new Date());
+  const today = accountToday(account);
   const rows: ExternalMetricRow[] = [];
 
   for (const c of account.campaigns) {
@@ -191,6 +173,22 @@ export function generateDemoMetrics(accountExternalId: string, range: { from: st
   }
   return rows;
 }
+
+/** Sample leads for an account, matching its generated ad-level conversions. */
+export function generateDemoLeadsFor(accountExternalId: string, params: { since: Date | null; now?: Date }) {
+  const account = findAccount(accountExternalId);
+  const now = params.now ?? new Date();
+  const today = accountToday(account, now);
+  const rows = generateDemoMetrics(accountExternalId, { from: addDays(today, -(DEMO_LEAD_DAYS - 1)), to: today });
+  return generateDemoLeads(account, rows, { since: params.since, now });
+}
+
+/** Platforms whose real API lets us set an account limit (PLATFORM_BILLING.accountLimit). */
+const DEMO_LIMIT_PLATFORMS = new Set<Platform>(["META", "GOOGLE"]);
+/** Sample account limits set from the app, by account id (null = removed). */
+const demoLimits = new Map<string, number | null>();
+/** Test hook: forgets sample limits set with setSpendLimit. */
+export const resetDemoBilling = () => demoLimits.clear();
 
 export class DemoConnector implements AdPlatformConnector {
   constructor(readonly platform: Platform) {}
@@ -229,6 +227,49 @@ export class DemoConnector implements AdPlatformConnector {
     return generateDemoMetrics(account.externalId, range);
   }
 
+  /** Sample form leads for this platform's lead-gen campaigns (none for platforms without one). */
+  async fetchLeads(_auth: unknown, params: { since: Date | null }) {
+    const account = DEMO_ACCOUNTS[this.platform];
+    if (!account?.campaigns.some((c) => c.leadForm)) return [];
+    return generateDemoLeadsFor(account.externalId, params);
+  }
+
+  /**
+   * Sample billing. Meta and Google samples have an account limit (Meta spend cap, Google
+   * account budget) sized to the month's sample spend, and Meta an unpaid balance of the
+   * last three days; a limit set here is kept in memory, like an edit on the platform.
+   */
+  async getBilling(_auth: unknown, ref: AccountRef & { currency: string }): Promise<AccountBilling> {
+    const account = findAccount(ref.externalId);
+    const none: AccountBilling = { spendLimit: null, spentTowardLimit: null, balanceDue: null, fundsRemaining: null, health: "ok", note: null };
+    if (!DEMO_LIMIT_PLATFORMS.has(this.platform)) return none;
+    const today = accountToday(account);
+    const spendSince = (from: string) =>
+      Math.round(generateDemoMetrics(account.externalId, { from, to: today }).reduce((sum, r) => sum + (r.level === "CAMPAIGN" ? r.spend : 0), 0) * 100) / 100;
+    const monthSpend = spendSince(`${today.slice(0, 7)}-01`);
+    const spendLimit = demoLimits.has(account.externalId) ? demoLimits.get(account.externalId)! : Math.ceil((monthSpend * 1.6 + 1) / 10_000) * 10_000;
+    const used = spendLimit ? monthSpend / spendLimit : 0;
+    return {
+      spendLimit,
+      spentTowardLimit: monthSpend,
+      balanceDue: this.platform === "META" ? spendSince(addDays(today, -2)) : null,
+      fundsRemaining: this.platform === "GOOGLE" && spendLimit != null ? Math.max(0, Math.round((spendLimit - monthSpend) * 100) / 100) : null,
+      ...(used >= 1
+        ? { health: "blocked" as const, note: "Spending limit reached. Ads are paused until it's raised." }
+        : used >= 0.9
+          ? { health: "attention" as const, note: `${Math.floor(used * 100)}% of the spending limit used.` }
+          : { health: "ok" as const, note: null }),
+    };
+  }
+
+  async setSpendLimit(_auth: unknown, ref: AccountRef & { currency: string }, amount: number | null) {
+    if (!DEMO_LIMIT_PLATFORMS.has(this.platform)) {
+      throw new ConnectorError("UNSUPPORTED", "This platform has no account spending limit. Use the monthly budget instead.");
+    }
+    findAccount(ref.externalId);
+    demoLimits.set(ref.externalId, amount);
+  }
+
   // Changes to sample campaigns are applied to our database only.
   async setCampaignStatus() {}
   async setCampaignDailyBudget() {}
@@ -243,6 +284,6 @@ export class DemoConnector implements AdPlatformConnector {
 
   /** Sample campaigns are created locally only; nothing is sent to an ad platform. */
   createCampaign(_auth: unknown, account: AccountRef, draft: BuilderDraft): Promise<AccountStructure> {
-    return Promise.resolve(demoCreateCampaign(account.externalId, draft));
+    return Promise.resolve(demoCreateCampaign(account.externalId, draft, builderZone(account)));
   }
 }

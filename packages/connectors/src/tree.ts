@@ -1,7 +1,7 @@
 import type { AccountStructure, EntityStatus } from "./types";
 
 export function accountTree(args: {
-  campaign: { id: string; name: string; status: EntityStatus; objective: string | null; daily: number | null; lifetime?: number | null; start?: string | null; end?: string | null };
+  campaign: { id: string; name: string; status: EntityStatus; objective: string | null; daily: number | null; lifetime?: number | null; start?: string | null; end?: string | null; raw?: Record<string, unknown> };
   groups: { id: string; name: string; status: EntityStatus; daily?: number | null; bid?: string | null; key?: string }[];
   ads: { id: string; groupId: string; name: string; status: EntityStatus; headline?: string | null; body?: string | null; url?: string | null; key?: string }[];
 }): AccountStructure {
@@ -19,7 +19,7 @@ export function accountTree(args: {
         startDate: c.start ?? null,
         endDate: c.end ?? null,
         updatedAt: new Date(),
-        raw: {},
+        raw: c.raw ?? {},
       },
     ],
     adGroups: args.groups.map((g) => ({
@@ -47,4 +47,13 @@ export function accountTree(args: {
       sourceKey: a.key,
     })),
   };
+}
+
+/**
+ * Sync safety net: whether campaigns missing from a structure sync may be marked
+ * removed. An empty list for an account with campaigns on record is far more
+ * likely an API hiccup than everything being deleted, so that run removes nothing.
+ */
+export function removalAllowed(returned: number, onRecord: number) {
+  return returned > 0 || onRecord === 0;
 }

@@ -1,4 +1,4 @@
-import { changeCampaignBudget, changeCampaignStatus, type Actor } from "@ashniva/core";
+import { addTotals, changeCampaignBudget, changeCampaignStatus, fxContext, roundMoney, scaleMoney, type Actor } from "@ashniva/core";
 import { num, prisma, type Prisma } from "@ashniva/db";
 import {
   bulkCampaignActionSchema,
@@ -14,6 +14,7 @@ import {
   type AdRowDTO,
   type CampaignDetailResponse,
   type CampaignListResponse,
+  type MetricTotals,
   type OverviewResponse,
   type PlatformBreakdown,
 } from "@ashniva/shared";
@@ -26,22 +27,26 @@ import { creativesRouter } from "./creatives.routes";
 import { leadsRouter } from "./leads.routes";
 import { reportsRouter } from "./reports.routes";
 import { rulesRouter } from "./rules.routes";
+import { spendRouter } from "./spend.routes";
 import { toAuditDTO } from "../lib/serialize";
 import { loadWorkspace, requireActivePlanForWrites, requirePermission } from "../middleware/auth";
 import {
-  SUM_FIELDS,
+  convertedByEntity,
+  convertedDaily,
   dateFilter,
   metricsByEntity,
+  seriesOf,
   sumMetrics,
+  sumRows,
   timeseries,
   toCampaignRow,
-  toTotals,
   workspaceAccountIds,
+  workspaceAccounts,
 } from "./analytics.service";
 
 export const workspacesRouter = Router({ mergeParams: true });
 workspacesRouter.use(loadWorkspace, requireActivePlanForWrites);
-workspacesRouter.use(creativesRouter, adMediaRouter, leadsRouter, builderRouter, reportsRouter, rulesRouter, aiRouter);
+workspacesRouter.use(creativesRouter, adMediaRouter, leadsRouter, builderRouter, reportsRouter, rulesRouter, aiRouter, spendRouter);
 
 const campaignInclude = { adAccount: { select: { id: true, name: true, currency: true } } } as const;
 
@@ -50,42 +55,49 @@ const campaignInclude = { adAccount: { select: { id: true, name: true, currency:
 workspacesRouter.get("/overview", async (req, res) => {
   const range = parse(dateRangeQuery, req.query);
   const compareRange = previousPeriod(range.from, range.to);
-  const accountIds = await workspaceAccountIds(req.workspace!.id);
+  const accounts = await workspaceAccounts(req.workspace!.id);
+  const accountIds = accounts.map((a) => a.id);
+  const platformOf = new Map(accounts.map((a) => [a.id, a.platform]));
+  // One rates load covers both periods; every amount below is in the workspace currency.
+  const fx = await fxContext(req.workspace!.currency, accounts, { from: compareRange.from, to: range.to });
 
   const base = { adAccountId: { in: accountIds }, level: "CAMPAIGN" as const };
   const current = { ...base, date: dateFilter(range) };
 
-  const [totals, previous, series, platformRows, campaignMetrics, connections] = await Promise.all([
-    sumMetrics(current),
-    sumMetrics({ ...base, date: dateFilter(compareRange) }),
-    timeseries(current, range),
-    prisma.metricDaily.groupBy({ by: ["platform"], where: current, _sum: SUM_FIELDS }),
-    prisma.metricDaily.groupBy({
-      by: ["entityId"],
-      where: current,
-      _sum: SUM_FIELDS,
-      orderBy: { _sum: { spend: "desc" } },
-      take: 6,
-    }),
+  const [currentRows, previousRows, byCampaign, connections] = await Promise.all([
+    convertedDaily(current, fx),
+    convertedDaily({ ...base, date: dateFilter(compareRange) }, fx),
+    convertedByEntity(current, fx, accountIds),
     prisma.platformConnection.findMany({
       where: { adAccounts: { some: { id: { in: accountIds } } } },
       select: { status: true, syncStatus: true, lastSyncedAt: true },
     }),
   ]);
 
-  const byPlatform: PlatformBreakdown[] = platformRows
-    .map((r) => ({ platform: r.platform, metrics: deriveMetrics(toTotals(r._sum)) }))
+  const platformTotals = new Map<string, { totals: MetricTotals }[]>();
+  for (const r of currentRows) {
+    const p = platformOf.get(r.adAccountId)!;
+    const list = platformTotals.get(p);
+    if (list) list.push(r);
+    else platformTotals.set(p, [r]);
+  }
+  const byPlatform: PlatformBreakdown[] = [...platformTotals.entries()]
+    .map(([platform, rows]) => ({ platform: platform as PlatformBreakdown["platform"], metrics: deriveMetrics(sumRows(rows)) }))
     .sort((a, b) => b.metrics.spend - a.metrics.spend);
 
-  const top = await prisma.campaign.findMany({
-    where: { id: { in: campaignMetrics.map((m) => m.entityId) } },
-    include: campaignInclude,
-  });
-  const topMetrics = new Map(campaignMetrics.map((m) => [m.entityId, deriveMetrics(toTotals(m._sum))]));
-  const topCampaigns = campaignMetrics
-    .map((m) => top.find((c) => c.id === m.entityId))
+  // Ranked by spend in the workspace currency, so a ₹ account can't outrank a $ one on raw digits.
+  const topIds = [...byCampaign.entries()]
+    .sort((a, b) => b[1].spend - a[1].spend)
+    .slice(0, 6)
+    .map(([id]) => id);
+  const top = await prisma.campaign.findMany({ where: { id: { in: topIds } }, include: campaignInclude });
+  const topCampaigns = topIds
+    .map((id) => top.find((c) => c.id === id))
     .filter((c) => c !== undefined)
-    .map((c) => toCampaignRow(c, topMetrics.get(c.id)));
+    .map((c) => ({
+      ...toCampaignRow(c, deriveMetrics(byCampaign.get(c.id)!)),
+      currency: fx.converts(c.adAccountId) || c.adAccount.currency === fx.currency ? fx.currency : c.adAccount.currency,
+    }));
 
   const lastSyncedAt = connections
     .map((c) => c.lastSyncedAt)
@@ -96,9 +108,9 @@ workspacesRouter.get("/overview", async (req, res) => {
     range,
     compareRange,
     currency: req.workspace!.currency,
-    totals,
-    previous,
-    timeseries: series,
+    totals: deriveMetrics(sumRows(currentRows)),
+    previous: deriveMetrics(sumRows(previousRows)),
+    timeseries: seriesOf(currentRows, range),
     byPlatform,
     topCampaigns,
     accounts: {
@@ -107,6 +119,7 @@ workspacesRouter.get("/overview", async (req, res) => {
       failing: connections.filter((c) => c.status !== "ACTIVE" || c.syncStatus === "FAILED").length,
     },
     lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
+    fx: fx.info,
   };
   res.json(body);
 });
@@ -115,8 +128,10 @@ workspacesRouter.get("/overview", async (req, res) => {
 
 workspacesRouter.get("/campaigns", async (req, res) => {
   const q = parse(campaignListQuery, req.query);
-  const accountIds = await workspaceAccountIds(req.workspace!.id);
-  const scopedAccounts = q.adAccountId ? accountIds.filter((id) => id === q.adAccountId) : accountIds;
+  const accounts = await workspaceAccounts(req.workspace!.id);
+  const scoped = q.adAccountId ? accounts.filter((a) => a.id === q.adAccountId) : accounts;
+  const scopedAccounts = scoped.map((a) => a.id);
+  const fx = await fxContext(req.workspace!.currency, scoped, q);
 
   const where: Prisma.CampaignWhereInput = {
     adAccountId: { in: scopedAccounts },
@@ -125,31 +140,33 @@ workspacesRouter.get("/campaigns", async (req, res) => {
     ...(q.search ? { name: { contains: q.search, mode: "insensitive" } } : {}),
   };
   const campaigns = await prisma.campaign.findMany({ where, include: campaignInclude, orderBy: { name: "asc" } });
-  const metrics = await metricsByEntity({
+  const metricWhere: Prisma.MetricDailyWhereInput = {
     level: "CAMPAIGN",
     adAccountId: { in: scopedAccounts },
     entityId: { in: campaigns.map((c) => c.id) },
     date: dateFilter(q),
-  });
+  };
+  // Rows stay in each account's own currency; accounts in another currency also get a converted copy.
+  const [metrics, converted] = await Promise.all([
+    metricsByEntity(metricWhere),
+    convertedByEntity(metricWhere, fx, scopedAccounts.filter((id) => fx.converts(id))),
+  ]);
 
-  const rows = campaigns.map((c) => toCampaignRow(c, metrics.get(c.id)));
-  const totals = rows.reduce(
-    (acc, r) => ({
-      impressions: acc.impressions + r.metrics.impressions,
-      clicks: acc.clicks + r.metrics.clicks,
-      spend: acc.spend + r.metrics.spend,
-      conversions: acc.conversions + r.metrics.conversions,
-      conversionValue: acc.conversionValue + r.metrics.conversionValue,
-      videoViews: acc.videoViews + r.metrics.videoViews,
-    }),
-    emptyTotals(),
-  );
+  const empty = deriveMetrics(emptyTotals());
+  const rows = campaigns.map((c) => {
+    const row = toCampaignRow(c, metrics.get(c.id));
+    if (fx.converts(c.adAccountId)) row.converted = deriveMetrics(converted.get(c.id) ?? empty);
+    return row;
+  });
+  const inWorkspace = (r: (typeof rows)[number]) => r.converted ?? r.metrics;
+  const totals = rows.reduce<MetricTotals>((acc, r) => addTotals(acc, inWorkspace(r)), emptyTotals());
 
   const body: CampaignListResponse = {
     range: { from: q.from, to: q.to },
     currency: req.workspace!.currency,
-    campaigns: rows.sort((a, b) => b.metrics.spend - a.metrics.spend),
-    totals: deriveMetrics(totals),
+    campaigns: rows.sort((a, b) => inWorkspace(b).spend - inWorkspace(a).spend),
+    totals: deriveMetrics(roundMoney(totals)),
+    fx: fx.info,
   };
   res.json(body);
 });
@@ -187,8 +204,17 @@ workspacesRouter.get("/campaigns/:campaignId", async (req, res) => {
   const empty = deriveMetrics(emptyTotals());
   const bySpend = <T extends { metrics: { spend: number } }>(a: T, b: T) => b.metrics.spend - a.metrics.spend;
 
+  // The campaign is shown in what its account bills in, with the workspace-currency equivalent alongside.
+  const row = toCampaignRow(campaign, totals);
+  const fx = await fxContext(req.workspace!.currency, [campaign.adAccount], range);
+  if (fx.converts(campaign.adAccountId)) {
+    const sum = series.reduce<MetricTotals>((acc, p) => addTotals(acc, scaleMoney(p, fx.factor(campaign.adAccount.currency, p.date))), emptyTotals());
+    row.converted = deriveMetrics(roundMoney(sum));
+  }
+
   const body: CampaignDetailResponse = {
-    campaign: toCampaignRow(campaign, totals),
+    fx: fx.info,
+    campaign: row,
     timeseries: series,
     adGroups: groups
       .map(
@@ -268,7 +294,7 @@ workspacesRouter.get("/ad-accounts", async (req, res) => {
   const accounts = await prisma.adAccount.findMany({
     where: { workspaceId: req.workspace!.id },
     orderBy: [{ platform: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, externalId: true, platform: true, currency: true, lastSyncedAt: true, connection: { select: { mode: true, status: true } } },
+    select: { id: true, name: true, externalId: true, platform: true, currency: true, timezone: true, lastSyncedAt: true, connection: { select: { mode: true, status: true } } },
   });
   res.json(accounts.map(({ connection, ...a }) => ({ ...a, sample: connection.mode === "DEMO", connected: connection.status !== "REVOKED" })));
 });

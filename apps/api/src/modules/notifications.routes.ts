@@ -31,9 +31,13 @@ notificationsRouter.get("/", async (req, res) => {
 });
 
 notificationsRouter.post("/read", async (req, res) => {
-  const { ids } = parse(z.object({ ids: z.array(z.string()).max(200).optional() }), req.body ?? {});
+  const { ids, orgId } = parse(
+    z.object({ ids: z.array(z.string()).max(200).optional(), orgId: z.string().max(50).optional() }),
+    req.body ?? {},
+  );
   await prisma.notification.updateMany({
-    where: { userId: req.userId!, readAt: null, ...(ids ? { id: { in: ids } } : {}) },
+    // "Mark all read" in one organization's bell leaves the others' alone.
+    where: { userId: req.userId!, readAt: null, ...(ids ? { id: { in: ids } } : {}), ...(orgId ? { orgId } : {}) },
     data: { readAt: new Date() },
   });
   res.status(204).end();
@@ -43,7 +47,7 @@ notificationsRouter.post("/read", async (req, res) => {
 
 const toPrefsDTO = (p: NotificationPrefsDTO | null): NotificationPrefsDTO =>
   p
-    ? { ruleAlerts: p.ruleAlerts, reportCopies: p.reportCopies, lowAiBalance: p.lowAiBalance, syncFailures: p.syncFailures }
+    ? { ruleAlerts: p.ruleAlerts, reportCopies: p.reportCopies, lowAiBalance: p.lowAiBalance, syncFailures: p.syncFailures, spendAlerts: p.spendAlerts }
     : { ...DEFAULT_NOTIFICATION_PREFS };
 
 notificationsRouter.get("/preferences", async (req, res) => {

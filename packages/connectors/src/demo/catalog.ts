@@ -19,7 +19,26 @@ export interface DemoCampaignSpec {
   startedDaysAgo: number;
   groups: string[];
   ads: { name: string; headline: string; body: string }[];
+  /** Lead-gen campaigns: the instant form their conversions are submitted through. */
+  leadForm?: DemoLeadForm;
 }
+
+/** A sample instant form. Each lead answers the contact questions plus every listed question. */
+export interface DemoLeadForm {
+  name: string;
+  /** "meta" forms ask for full_name and come from fb/ig; "linkedin" ones ask for name, company and title. */
+  style: "meta" | "linkedin";
+  /** Meta only: share of leads from Instagram (the rest from Facebook). */
+  instagramShare?: number;
+  questions: { key: string; options: string[] }[];
+}
+
+/** External ids of a sample campaign and its ad groups and ads. */
+export const demoIds = (account: Pick<DemoAccountSpec, "externalId">, c: Pick<DemoCampaignSpec, "key">) => ({
+  campaign: `${account.externalId}-${c.key}`,
+  group: (gi: number) => `${account.externalId}-${c.key}-g${gi}`,
+  ad: (gi: number, ai: number) => `${account.externalId}-${c.key}-g${gi}-a${ai}`,
+});
 
 export interface DemoAccountSpec {
   externalId: string;
@@ -115,6 +134,17 @@ export const DEMO_ACCOUNTS: Partial<Record<Platform, DemoAccountSpec>> = {
           { name: "Instant form – Book a stylist", headline: "Book a free 1:1 styling session", body: "Our stylists help you plan the perfect wedding wardrobe." },
           { name: "Video – Stylist testimonial", headline: "Meet your personal stylist", body: "See how 5,000+ brides found their look with us." },
         ],
+        leadForm: {
+          name: "Free Style Consultation – Booking form",
+          style: "meta",
+          instagramShare: 0.42,
+          questions: [
+            { key: "city", options: ["Mumbai", "Delhi", "Bengaluru", "Hyderabad", "Pune", "Chennai", "Kolkata", "Ahmedabad", "Jaipur", "Lucknow"] },
+            { key: "occasion", options: ["My wedding", "Family wedding", "Engagement", "Reception", "Festive season"] },
+            { key: "budget", options: ["Under ₹25,000", "₹25,000–₹50,000", "₹50,000–₹1,00,000", "Above ₹1,00,000"] },
+            { key: "preferred_time", options: ["Weekday morning", "Weekday evening", "Weekend"] },
+          ],
+        },
       },
       {
         key: "m4",
@@ -310,6 +340,14 @@ export const DEMO_ACCOUNTS: Partial<Record<Platform, DemoAccountSpec>> = {
           { name: "Single image – Partner program", headline: "Stock India's fastest-growing ethnic brand", body: "Margins up to 45% for retail partners." },
           { name: "Document – Wholesale catalogue", headline: "Download the 2026 wholesale catalogue", body: "800+ SKUs with partner pricing." },
         ],
+        leadForm: {
+          name: "Retail Partner Program – Enquiry",
+          style: "linkedin",
+          questions: [
+            { key: "city", options: ["Mumbai", "Delhi", "Bengaluru", "Hyderabad", "Pune", "Chennai", "Surat", "Indore"] },
+            { key: "number_of_stores", options: ["1", "2–5", "6–20", "More than 20"] },
+          ],
+        },
       },
       {
         key: "l2",
@@ -326,6 +364,15 @@ export const DEMO_ACCOUNTS: Partial<Record<Platform, DemoAccountSpec>> = {
         ads: [
           { name: "Lead form – Diwali gifting", headline: "Corporate Diwali gifting, sorted", body: "Curated hampers from ₹1,500 per employee." },
         ],
+        leadForm: {
+          name: "Corporate Gifting – Quote request",
+          style: "linkedin",
+          questions: [
+            { key: "number_of_employees", options: ["50–200", "200–1,000", "1,000–5,000", "More than 5,000"] },
+            { key: "budget_per_employee", options: ["₹1,500–₹2,500", "₹2,500–₹5,000", "Above ₹5,000"] },
+            { key: "delivery_by", options: ["Before Dhanteras", "Before Diwali", "After Diwali"] },
+          ],
+        },
       },
     ],
   },

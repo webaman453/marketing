@@ -1,7 +1,7 @@
 "use client";
 
 import { isPlatformShown } from "@ashniva/shared";
-import { History, LayoutDashboard, Megaphone, Moon, Plug, Search, Settings, Sun, Users } from "lucide-react";
+import { Bot, Contact, FileText, History, LayoutDashboard, LayoutGrid, Megaphone, Moon, Plug, Search, Settings, ShieldCheck, Sun, Users, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
@@ -24,7 +24,7 @@ import { useWorkspace } from "./workspace-context";
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const { me, workspace } = useWorkspace();
+  const { me, workspace, can } = useWorkspace();
   const { setTheme, resolvedTheme } = useTheme();
   const campaigns = useCampaigns(workspace.id, {});
 
@@ -66,21 +66,45 @@ export function CommandMenu() {
             <CommandItem onSelect={() => go(`${base}/overview`)}>
               <LayoutDashboard /> Overview
             </CommandItem>
+            <CommandItem onSelect={() => go(`${base}/reports`)}>
+              <FileText /> Reports
+            </CommandItem>
             <CommandItem onSelect={() => go(`${base}/campaigns`)}>
               <Megaphone /> Campaigns
+            </CommandItem>
+            {can("campaigns:edit") && (
+              <CommandItem onSelect={() => go(`${base}/formats`)}>
+                <LayoutGrid /> Ad formats
+              </CommandItem>
+            )}
+            <CommandItem onSelect={() => go(`${base}/leads`)}>
+              <Contact /> Leads
+            </CommandItem>
+            <CommandItem onSelect={() => go(`${base}/spend`)}>
+              <Wallet /> Spend &amp; billing
+            </CommandItem>
+            <CommandItem onSelect={() => go(`${base}/automations`)}>
+              <Bot /> Automations
             </CommandItem>
             <CommandItem onSelect={() => go(`${base}/integrations`)}>
               <Plug /> Integrations
             </CommandItem>
-            <CommandItem onSelect={() => go(`${base}/activity`)}>
-              <History /> Activity log
-            </CommandItem>
+            {can("audit:view") && (
+              <CommandItem onSelect={() => go(`${base}/activity`)}>
+                <History /> Activity log
+              </CommandItem>
+            )}
             <CommandItem onSelect={() => go(`${base}/settings/team`)}>
               <Users /> Team members
             </CommandItem>
             <CommandItem onSelect={() => go(`${base}/settings`)}>
               <Settings /> Settings
             </CommandItem>
+            {me.user.isSuperAdmin && (
+              <CommandItem onSelect={() => go("/admin")}>
+                <ShieldCheck /> Platform admin
+              </CommandItem>
+            )}
           </CommandGroup>
           {campaigns.data && campaigns.data.campaigns.length > 0 && (
             <>

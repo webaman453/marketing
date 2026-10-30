@@ -148,7 +148,8 @@ export async function evaluateRule(ruleId: string, opts: EvaluateOptions = {}) {
             if (current == null) throw new Error("Campaign has no daily budget");
             const factor = 1 + ((action.type === "INCREASE_BUDGET" ? 1 : -1) * (action.percent ?? 10)) / 100;
             let next = Math.round(current * factor * 100) / 100;
-            if (action.maxBudget && next > action.maxBudget) next = action.maxBudget;
+            // The cap limits how far an increase goes; it never lowers a budget that is already above it.
+            if (action.maxBudget && next > action.maxBudget) next = Math.max(current, action.maxBudget);
             if (next === current) {
               detail.actions.push({ type: action.type, ok: true, detail: "Already at the budget cap" });
             } else {

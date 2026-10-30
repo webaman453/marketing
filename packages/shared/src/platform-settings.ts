@@ -246,14 +246,14 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     consoleUrl: "https://developer.x.com/en/portal/dashboard",
     consoleLabel: "X developer portal",
     steps: [
-      "Create a project and an app with Ads API access (OAuth 2.0).",
-      "Add the redirect URL below under User authentication settings.",
-      "Turn on ads.read and ads.write, then paste the Client ID and Client secret here.",
+      "Create an app and apply for Ads API access for it. The Ads API signs every call with OAuth 1.0a, not OAuth 2.0.",
+      "In User authentication settings, turn on OAuth 1.0a with Read and write permissions and add the redirect URL below as a Callback URL.",
+      "Under Keys and tokens, paste the API Key (consumer key) and API Key Secret (consumer secret) here.",
     ],
     needsRedirectUrl: true,
     fields: [
-      { key: "X_CLIENT_ID", label: "Client ID" },
-      { key: "X_CLIENT_SECRET", label: "Client secret", secret: true },
+      { key: "X_CONSUMER_KEY", label: "API Key (consumer key)" },
+      { key: "X_CONSUMER_SECRET", label: "API Key Secret (consumer secret)", secret: true },
     ],
   },
   {
@@ -261,7 +261,7 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     title: "Apple Ads",
     kind: "platform",
     platform: "APPLE",
-    purpose: "Lets customers connect Apple Search Ads organizations.",
+    purpose: "Optional. Customers connect Apple Search Ads with their own API user; these keys only let your own organization connect without entering them.",
     consoleUrl: "https://app.searchads.apple.com/cm/app",
     consoleLabel: "Apple Search Ads",
     steps: [
@@ -299,7 +299,7 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     title: "Criteo",
     kind: "platform",
     platform: "CRITEO",
-    purpose: "Lets customers connect Criteo advertisers.",
+    purpose: "Optional. Customers connect Criteo with their own client id and secret; these keys only let your own organization connect without entering them.",
     consoleUrl: "https://developers.criteo.com/",
     consoleLabel: "Criteo developers",
     steps: [
@@ -316,7 +316,7 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     title: "Taboola",
     kind: "platform",
     platform: "TABOOLA",
-    purpose: "Lets customers connect Taboola Backstage accounts.",
+    purpose: "Optional. Customers connect Taboola with their own client id and secret; these keys only let your own organization connect without entering them.",
     consoleUrl: "https://backstage.taboola.com/",
     consoleLabel: "Taboola Backstage",
     steps: [
@@ -333,7 +333,7 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     title: "Outbrain",
     kind: "platform",
     platform: "OUTBRAIN",
-    purpose: "Lets customers connect Outbrain Amplify marketers.",
+    purpose: "Optional. Customers connect Outbrain with their own Amplify token; this token only lets your own organization connect without entering one.",
     consoleUrl: "https://my.outbrain.com/amplify/site/api",
     consoleLabel: "Outbrain Amplify",
     steps: [
@@ -347,7 +347,7 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
     title: "The Trade Desk",
     kind: "platform",
     platform: "TRADEDESK",
-    purpose: "Lets customers connect The Trade Desk advertisers.",
+    purpose: "Optional. Customers connect The Trade Desk with their own token and partner id; these keys only let your own organization connect without entering them.",
     consoleUrl: "https://partner.thetradedesk.com/",
     consoleLabel: "The Trade Desk partner portal",
     steps: [

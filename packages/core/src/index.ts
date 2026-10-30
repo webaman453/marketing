@@ -21,3 +21,5 @@ export * from "./ai-tokens";
 export * from "./platform-settings";
 export * from "./ad-media";
 export * from "./leads";
+export * from "./fx";
+export * from "./spend";

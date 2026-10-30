@@ -3,6 +3,7 @@
  * Used for the in-app view, CSV/PDF exports, shared links and scheduled emails.
  */
 import { num, prisma, type Prisma, type Report } from "@ashniva/db";
+import { addTotals, fxContext, roundMoney, scaleMoney, type FxContext } from "./fx";
 import {
   BRAND,
   DIMENSION_LABELS,
@@ -68,61 +69,83 @@ const dateWhere = (r: { from: string; to: string }) => ({
   lte: new Date(`${r.to}T00:00:00Z`),
 });
 
+type Account = { id: string; name: string; platform: Platform; currency: string };
+type Group = { label: string; platform?: string; totals: MetricTotals };
+
+/** Sums per (ad account, day), each converted into the workspace currency at that day's rate. */
+async function dailyRows(where: Prisma.MetricDailyWhereInput, fx: FxContext) {
+  const rows = await prisma.metricDaily.groupBy({ by: ["adAccountId", "date"], where, _sum: SUM });
+  return rows.map((r) => ({
+    adAccountId: r.adAccountId,
+    date: r.date.toISOString().slice(0, 10),
+    totals: scaleMoney(totalsOf(r._sum), fx.accountFactor(r.adAccountId, r.date)),
+  }));
+}
+
+const add = (map: Map<string, Group>, key: string, init: Omit<Group, "totals">, t: MetricTotals) => {
+  const g = map.get(key) ?? { ...init, totals: emptyTotals() };
+  g.totals = addTotals(g.totals, t);
+  map.set(key, g);
+};
+
 async function grouped(
   config: ReportConfig,
   base: Prisma.MetricDailyWhereInput,
   range: { from: string; to: string },
-): Promise<Map<string, { label: string; platform?: string; totals: MetricTotals }>> {
+  accounts: Map<string, Account>,
+  fx: FxContext,
+): Promise<Map<string, Group>> {
   const where = { ...base, date: dateWhere(range) };
-  const out = new Map<string, { label: string; platform?: string; totals: MetricTotals }>();
+  const out = new Map<string, Group>();
 
-  switch (config.dimension) {
-    case "date": {
-      const rows = await prisma.metricDaily.groupBy({ by: ["date"], where, _sum: SUM, orderBy: { date: "asc" } });
-      for (const r of rows) {
-        const d = r.date.toISOString().slice(0, 10);
-        out.set(d, { label: d, totals: totalsOf(r._sum) });
-      }
-      break;
+  if (config.dimension === "campaign") {
+    // Accounts in the workspace currency are summed in the database; others day by day.
+    const ids = [...accounts.keys()];
+    const plain = ids.filter((id) => !fx.converts(id));
+    const converting = ids.filter((id) => fx.converts(id));
+    const [plainRows, dayRows] = await Promise.all([
+      plain.length ? prisma.metricDaily.groupBy({ by: ["entityId"], where: { ...where, adAccountId: { in: plain } }, _sum: SUM }) : [],
+      converting.length
+        ? prisma.metricDaily.groupBy({ by: ["entityId", "adAccountId", "date"], where: { ...where, adAccountId: { in: converting } }, _sum: SUM })
+        : [],
+    ]);
+    const totals = new Map<string, MetricTotals>();
+    for (const r of plainRows) totals.set(r.entityId, totalsOf(r._sum));
+    for (const r of dayRows) {
+      const t = scaleMoney(totalsOf(r._sum), fx.accountFactor(r.adAccountId, r.date));
+      totals.set(r.entityId, addTotals(totals.get(r.entityId) ?? emptyTotals(), t));
     }
-    case "platform": {
-      const rows = await prisma.metricDaily.groupBy({ by: ["platform"], where, _sum: SUM });
-      for (const r of rows) out.set(r.platform, { label: PLATFORM_INFO[r.platform].name, platform: r.platform, totals: totalsOf(r._sum) });
-      break;
+    const top = [...totals.entries()].sort((a, b) => b[1].spend - a[1].spend).slice(0, MAX_ROWS);
+    const campaigns = await prisma.campaign.findMany({
+      where: { id: { in: top.map(([id]) => id) } },
+      select: { id: true, name: true, platform: true },
+    });
+    const byId = new Map(campaigns.map((c) => [c.id, c]));
+    for (const [id, t] of top) {
+      const c = byId.get(id);
+      if (c) out.set(c.id, { label: c.name, platform: c.platform, totals: roundMoney(t) });
     }
-    case "campaign": {
-      const rows = await prisma.metricDaily.groupBy({ by: ["entityId"], where, _sum: SUM, orderBy: { _sum: { spend: "desc" } }, take: MAX_ROWS });
-      const campaigns = await prisma.campaign.findMany({
-        where: { id: { in: rows.map((r) => r.entityId) } },
-        select: { id: true, name: true, platform: true },
-      });
-      const byId = new Map(campaigns.map((c) => [c.id, c]));
-      for (const r of rows) {
-        const c = byId.get(r.entityId);
-        if (c) out.set(c.id, { label: c.name, platform: c.platform, totals: totalsOf(r._sum) });
-      }
-      break;
-    }
-    case "adAccount": {
-      const rows = await prisma.metricDaily.groupBy({ by: ["adAccountId"], where, _sum: SUM });
-      const accounts = await prisma.adAccount.findMany({
-        where: { id: { in: rows.map((r) => r.adAccountId) } },
-        select: { id: true, name: true, platform: true },
-      });
-      const byId = new Map(accounts.map((a) => [a.id, a]));
-      for (const r of rows) {
-        const a = byId.get(r.adAccountId);
-        if (a) out.set(a.id, { label: a.name, platform: a.platform, totals: totalsOf(r._sum) });
-      }
-      break;
-    }
+    return out;
   }
+
+  const rows = await dailyRows(where, fx);
+  for (const r of rows) {
+    const a = accounts.get(r.adAccountId);
+    if (!a) continue;
+    if (config.dimension === "date") add(out, r.date, { label: r.date }, r.totals);
+    else if (config.dimension === "platform") add(out, a.platform, { label: PLATFORM_INFO[a.platform].name, platform: a.platform }, r.totals);
+    else add(out, a.id, { label: a.name, platform: a.platform }, r.totals);
+  }
+  for (const g of out.values()) g.totals = roundMoney(g.totals);
+  if (config.dimension === "date") return new Map([...out.entries()].sort((x, y) => x[0].localeCompare(y[0])));
   return out;
 }
 
 export interface RunReportOptions {
   range?: { from: string; to: string };
 }
+
+const sumAll = (rows: { totals: MetricTotals }[]) => roundMoney(rows.reduce((acc, r) => addTotals(acc, r.totals), emptyTotals()));
 
 export async function runReport(report: Report, opts: RunReportOptions = {}): Promise<ReportResult> {
   const config = reportConfigSchema.parse(report.config);
@@ -134,21 +157,23 @@ export async function runReport(report: Report, opts: RunReportOptions = {}): Pr
   const range = opts.range ?? resolveReportPreset(config.datePreset, todayIn(workspace.timezone));
   const compareRange = config.compare ? previousPeriod(range.from, range.to) : null;
 
-  const accounts = await prisma.adAccount.findMany({
+  const accountList = await prisma.adAccount.findMany({
     where: {
       workspaceId: workspace.id,
       ...(config.platforms.length ? { platform: { in: config.platforms as Platform[] } } : {}),
     },
-    select: { id: true },
+    select: { id: true, name: true, platform: true, currency: true },
   });
-  const base: Prisma.MetricDailyWhereInput = { adAccountId: { in: accounts.map((a) => a.id) }, level: "CAMPAIGN" };
+  const accounts = new Map(accountList.map((a) => [a.id, a]));
+  // Every amount in the report is in the workspace currency; one rates load covers both periods.
+  const fx = await fxContext(workspace.currency, accountList, { from: compareRange?.from ?? range.from, to: range.to });
+  const base: Prisma.MetricDailyWhereInput = { adAccountId: { in: accountList.map((a) => a.id) }, level: "CAMPAIGN" };
 
-  const [current, previous, totalAgg, prevAgg, daily] = await Promise.all([
-    grouped(config, base, range),
-    compareRange && config.dimension !== "date" ? grouped(config, base, compareRange) : Promise.resolve(null),
-    prisma.metricDaily.aggregate({ where: { ...base, date: dateWhere(range) }, _sum: SUM }),
-    compareRange ? prisma.metricDaily.aggregate({ where: { ...base, date: dateWhere(compareRange) }, _sum: SUM }) : Promise.resolve(null),
-    prisma.metricDaily.groupBy({ by: ["date"], where: { ...base, date: dateWhere(range) }, _sum: SUM, orderBy: { date: "asc" } }),
+  const [current, previous, daily, prevDaily] = await Promise.all([
+    grouped(config, base, range, accounts, fx),
+    compareRange && config.dimension !== "date" ? grouped(config, base, compareRange, accounts, fx) : Promise.resolve(null),
+    dailyRows({ ...base, date: dateWhere(range) }, fx),
+    compareRange ? dailyRows({ ...base, date: dateWhere(compareRange) }, fx) : Promise.resolve(null),
   ]);
 
   const rows: ReportRow[] = [...current.entries()].map(([key, v]) => ({
@@ -160,10 +185,11 @@ export async function runReport(report: Report, opts: RunReportOptions = {}): Pr
   }));
   if (config.dimension !== "date") rows.sort((a, b) => (b.values.spend ?? 0) - (a.values.spend ?? 0));
 
-  const byDate = new Map(daily.map((d) => [d.date.toISOString().slice(0, 10), totalsOf(d._sum)]));
+  const byDate = new Map<string, MetricTotals>();
+  for (const d of daily) byDate.set(d.date, addTotals(byDate.get(d.date) ?? emptyTotals(), d.totals));
   const chartMetric = config.chartMetric;
   const series = chartMetric
-    ? eachDay(range.from, range.to).map((date) => ({ date, value: pick(byDate.get(date) ?? emptyTotals())[chartMetric] }))
+    ? eachDay(range.from, range.to).map((date) => ({ date, value: pick(roundMoney(byDate.get(date) ?? emptyTotals()))[chartMetric] }))
     : [];
 
   return {
@@ -173,8 +199,8 @@ export async function runReport(report: Report, opts: RunReportOptions = {}): Pr
     currency: workspace.currency,
     config,
     rows,
-    totals: pick(totalsOf(totalAgg._sum)),
-    previousTotals: prevAgg ? pick(totalsOf(prevAgg._sum)) : null,
+    totals: pick(sumAll(daily)),
+    previousTotals: prevDaily ? pick(sumAll(prevDaily)) : null,
     series,
     branding: {
       name: org.brandName || org.name || BRAND.name,
@@ -184,10 +210,13 @@ export async function runReport(report: Report, opts: RunReportOptions = {}): Pr
     },
     workspaceName: workspace.name,
     generatedAt: new Date().toISOString(),
+    fx: fx.info,
   };
 }
 
 const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+/** Free-text cells (names typed by users or synced from platforms) must not start a spreadsheet formula (CSV injection). */
+const textCell = (v: string) => (/^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
 
 export function reportToCsv(result: ReportResult): string {
   const metrics = result.config.metrics;
@@ -197,7 +226,7 @@ export function reportToCsv(result: ReportResult): string {
   const lines = [header.map(csvCell).join(",")];
   for (const r of result.rows) {
     lines.push(
-      [r.label, ...(result.config.dimension === "campaign" ? [r.platform ? PLATFORM_INFO[r.platform as Platform].name : ""] : []), ...metrics.map((m) => raw(r.values[m], m))]
+      [textCell(r.label), ...(result.config.dimension === "campaign" ? [r.platform ? PLATFORM_INFO[r.platform as Platform].name : ""] : []), ...metrics.map((m) => raw(r.values[m], m))]
         .map(csvCell)
         .join(","),
     );

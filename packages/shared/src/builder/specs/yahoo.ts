@@ -22,7 +22,12 @@ export const yahooSpec: PlatformBuilderSpec = {
     label: "Campaign",
     sections: [
       { id: "details", title: "Campaign", fields: [nameField("Campaign name", "Festive display")] },
-      { id: "budget", title: "Budget", fields: budgetFields({}) },
+      {
+        id: "budget",
+        title: "Budget",
+        // The connector sends no schedule, so a lifetime budget would have no end date.
+        fields: budgetFields({ lifetime: false, help: "Daily budget for the campaign. It's split evenly across its lines." }),
+      },
       launchSection(),
     ],
   },
@@ -57,5 +62,5 @@ export const yahooSpec: PlatformBuilderSpec = {
   }),
   maxAdGroups: 10,
   maxAds: 15,
-  previews: (ctx) => (ctx.setup.format === "VIDEO" ? ["youtube_instream"] : ctx.setup.format === "NATIVE" ? ["google_display_native"] : ["google_display"]),
+  previews: (ctx) => (ctx.setup.format === "VIDEO" ? ["video_instream"] : ctx.setup.format === "NATIVE" ? ["native_feed"] : ["display_banner"]),
 };

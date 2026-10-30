@@ -28,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { applyServerErrors, toastError } from "@/lib/forms";
 import { qk } from "@/lib/queries";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 export default function GeneralSettingsPage() {
   const { org, workspace, can } = useWorkspace();
@@ -68,6 +69,7 @@ export default function GeneralSettingsPage() {
 
   const form = useForm<UpdateOrgInput>({ resolver: zodResolver(updateOrgSchema), values: { name: org.name } });
   const { errors, isSubmitting, isDirty } = form.formState;
+  useUnsavedChanges(canEditOrg && isDirty && !isSubmitting);
 
   const saveOrg = form.handleSubmit(async (values) => {
     try {

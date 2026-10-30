@@ -123,6 +123,28 @@ export function previewValues(spec: PlatformBuilderSpec, draft: BuilderDraft, gr
   };
 }
 
+/**
+ * The draft as the form currently shows it: values of fields hidden by the
+ * current choices are dropped, so a stale value (e.g. an audio URL after
+ * switching to a display ad) never reaches the platform.
+ */
+export function visibleDraft(spec: PlatformBuilderSpec, draft: BuilderDraft): BuilderDraft {
+  const adSpec = spec.ad(draft.setup);
+  const campaignCtx: FieldContext = { setup: draft.setup, campaign: draft.campaign, adGroup: {}, ad: {} };
+  return {
+    ...draft,
+    campaign: visibleValues(spec.campaign, draft.campaign, campaignCtx),
+    adGroups: draft.adGroups.map((g) => {
+      const groupCtx: FieldContext = { ...campaignCtx, adGroup: g.values };
+      return {
+        ...g,
+        values: visibleValues(spec.adGroup, g.values, groupCtx),
+        ads: g.ads.map((a) => ({ ...a, values: adSpec ? visibleValues(adSpec, a.values, { ...groupCtx, ad: a.values }) : a.values })),
+      };
+    }),
+  };
+}
+
 /** Default values for one level, given what's already chosen above it. */
 export function levelDefaults(level: LevelSpec, ctx: FieldContext): Values {
   return levelValues(levelFields(level), ctx);
@@ -182,7 +204,11 @@ export interface MediaInfo {
 const isEmpty = (v: unknown) =>
   v === undefined || v === null || (typeof v === "string" && v.trim() === "") || (Array.isArray(v) && v.length === 0);
 
-const URL_RE = /^https?:\/\/[^\s/$.?#].[^\s]*\.[^\s]{2,}/i;
+/**
+ * http(s), then a host of dot-separated labels (one letter is a valid label, as in x.com) ending in a
+ * top-level domain of at least two letters, an optional port, then any path/query/fragment.
+ */
+const URL_RE = /^https?:\/\/(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:\p{L}{2,}|xn--[a-z0-9-]+)\.?(?::\d{1,5})?(?:[/?#]\S*)?$/iu;
 
 const ratioOf = (r: string) => {
   const [a, b] = r.split(":").map(Number);
@@ -329,10 +355,14 @@ function levelIssues(level: LevelSpec, values: Values, ctx: FieldContext, media:
 export function validateDraft(spec: PlatformBuilderSpec, draft: BuilderDraft, media: Map<string, MediaInfo>): BuilderIssue[] {
   const issues: BuilderIssue[] = [];
   const base: FieldContext = { setup: draft.setup, campaign: draft.campaign, adGroup: {}, ad: {} };
+  const disabledPicks: BuilderIssue[] = [];
   for (const choice of spec.setup) {
     if (choice.showIf && !choice.showIf(draft.setup)) continue;
-    const allowed = (typeof choice.options === "function" ? choice.options(draft.setup) : choice.options).map((o) => o.value);
-    if (!draft.setup[choice.key] || !allowed.includes(String(draft.setup[choice.key]))) issues.push({ level: "setup", field: choice.key, message: `Choose ${choice.label.toLowerCase()}.` });
+    const options = typeof choice.options === "function" ? choice.options(draft.setup) : choice.options;
+    const picked = options.find((o) => o.value === String(draft.setup[choice.key] ?? ""));
+    if (!draft.setup[choice.key] || !picked) issues.push({ level: "setup", field: choice.key, message: `Choose ${choice.label.toLowerCase()}.` });
+    // A disabled option (start screen greys it out) can still arrive via the API or AI fill: it must never reach a launch.
+    else if (picked.disabled) disabledPicks.push({ level: "setup", field: choice.key, message: picked.disabledReason || `${picked.label} isn't available for ${choice.label.toLowerCase()}.` });
   }
   issues.push(...levelIssues(spec.campaign, draft.campaign, base, media, { level: "campaign" }));
 
@@ -348,6 +378,8 @@ export function validateDraft(spec: PlatformBuilderSpec, draft: BuilderDraft, me
     for (const a of g.ads) issues.push(...levelIssues(adSpec, a.values, { ...gctx, ad: a.values }, media, { level: "ad", nodeKey: a.key }));
   }
   issues.push(...(spec.validate?.(draft) ?? []));
+  // A spec's own message for the disabled choice (e.g. Google Video) wins over the generic one.
+  for (const d of disabledPicks) if (!issues.some((i) => i.level === "setup" && i.field === d.field)) issues.push(d);
   return issues;
 }
 
