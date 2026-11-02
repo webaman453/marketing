@@ -7,8 +7,8 @@
  */
 import type { BuilderDraft, BuilderOptions, EntityStatus, TargetingKind, TargetingSearchResult } from "@ashniva/shared";
 import { unzipSync, strFromU8 } from "fflate";
-import { ConnectorError, expiredGrant, isConnectorError, noRowsUnlessFatal, type ConnectorErrorCode } from "../errors";
-import { codeFromStatus, requestJson } from "../http";
+import { ConnectorError, expiredGrant, noRowsUnlessFatal, type ConnectorErrorCode } from "../errors";
+import { codeFromStatus, MAX_PAGES, requestJson } from "../http";
 import { ianaTimeZone } from "./timezones";
 import type {
   AccountBilling,
@@ -123,17 +123,35 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
       DeveloperToken: this.config.developerToken,
     };
     if (account) {
+      const customerId = account.meta?.customerId;
+      if (customerId == null || customerId === "") {
+        throw new ConnectorError(
+          "INVALID_REQUEST",
+          "Microsoft Ads customer id is missing for this account. Disconnect and connect Microsoft Ads again.",
+        );
+      }
       headers.CustomerAccountId = account.externalId;
-      if (account.meta?.customerId) headers.CustomerId = String(account.meta.customerId);
+      headers.CustomerId = String(customerId);
     }
-    return requestJson<T>(url, { method, headers, body }, this.mapError);
+    return requestJson<T>(url, { method, headers, body }, (status, resBody) => {
+      const err = this.mapError(status, resBody);
+      // NullRequest (100) means the API could not bind the body; the path pinpoints which call.
+      if (/request message is null/i.test(err.message)) {
+        return new ConnectorError(err.code, `${err.message} (${new URL(url).pathname})`, err.details);
+      }
+      return err;
+    });
   }
 
   /** Campaign and reporting calls need CustomerId. Older connections may not have saved it. */
   private async withCustomer(auth: ConnectorAuth, account: AccountRef): Promise<AccountRef> {
-    if (account.meta?.customerId) return account;
-    const { Account: a = {} } = await this.api<{ Account?: Row }>(`${CUSTOMER_API}/Account/Query`, auth, { AccountId: Number(account.externalId) });
-    const customerId = a.ParentCustomerId;
+    if (account.meta?.customerId != null && account.meta.customerId !== "") return account;
+    // SearchAccounts returns ParentCustomerId in one call (GetAccountsInfo does not).
+    const { Accounts = [] } = await this.api<{ Accounts?: Row[] }>(`${CUSTOMER_API}/Accounts/Search`, auth, {
+      Predicates: [{ Field: "AccountId", Operator: "Equals", Value: String(account.externalId) }],
+      PageInfo: { Index: 0, Size: 1 },
+    });
+    const customerId = Accounts[0]?.ParentCustomerId;
     if (customerId == null || customerId === "") {
       throw new ConnectorError(
         "INVALID_REQUEST",
@@ -189,28 +207,29 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
   }
 
   async listAdAccounts(auth: ConnectorAuth): Promise<ExternalAdAccount[]> {
-    const info = await this.api<{ AccountsInfo?: Row[] }>(`${CUSTOMER_API}/AccountsInfo/Query`, auth, {
-      CustomerId: null,
-      OnlyParentAccounts: false,
-    });
+    // SearchAccounts returns ParentCustomerId (required as the CustomerId header on campaign/reporting
+    // calls). GetAccountsInfo alone does not. https://learn.microsoft.com/advertising/guides/get-started
+    const { id: userId } = await this.getUser(auth);
     const out: ExternalAdAccount[] = [];
-    for (const a of info.AccountsInfo ?? []) {
-      // An account whose details can't be read is still listed; an expired login, rate limit or
-      // outage fails the listing instead of saving the account with a guessed currency.
-      const detail = await this.api<{ Account?: Row }>(`${CUSTOMER_API}/Account/Query`, auth, { AccountId: a.Id }).catch((err) => {
-        if (isConnectorError(err) && (err.code === "INVALID_REQUEST" || err.code === "PERMISSION_DENIED")) return { Account: undefined };
-        throw err;
+    const pageSize = 1000;
+    for (let index = 0; index < MAX_PAGES; index++) {
+      const { Accounts = [] } = await this.api<{ Accounts?: Row[] }>(`${CUSTOMER_API}/Accounts/Search`, auth, {
+        Predicates: [{ Field: "UserId", Operator: "Equals", Value: String(userId) }],
+        Ordering: [{ Field: "Id", Order: "Ascending" }],
+        PageInfo: { Index: index, Size: pageSize },
       });
-      const acc = detail.Account ?? {};
-      out.push({
-        externalId: String(a.Id),
-        name: a.Name ?? acc.Name ?? `Microsoft Ads ${a.Id}`,
-        currency: acc.CurrencyCode ?? "USD",
-        // AccountRef.timezone is IANA; createCampaign maps it back to Microsoft's value.
-        timezone: ianaTimeZone(acc.TimeZone),
-        status: a.AccountLifeCycleStatus ?? "Active",
-        meta: { customerId: acc.ParentCustomerId ?? null, number: a.Number },
-      });
+      for (const a of Accounts) {
+        out.push({
+          externalId: String(a.Id),
+          name: a.Name ?? `Microsoft Ads ${a.Id}`,
+          currency: a.CurrencyCode ?? "USD",
+          // AccountRef.timezone is IANA; createCampaign maps it back to Microsoft's value.
+          timezone: ianaTimeZone(a.TimeZone),
+          status: a.AccountLifeCycleStatus ?? "Active",
+          meta: { customerId: a.ParentCustomerId ?? null, number: a.Number },
+        });
+      }
+      if (Accounts.length < pageSize) break;
     }
     return out;
   }

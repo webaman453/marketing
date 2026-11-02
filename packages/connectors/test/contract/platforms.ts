@@ -245,7 +245,7 @@ export const PLATFORMS: PlatformCase[] = [
     platform: "MICROSOFT",
     connector: async () => new (await import("../../src/microsoft")).MicrosoftAdsConnector({ clientId: "id", clientSecret: "secret", developerToken: "dev", tenant: "common" }),
     auth: { accessToken: "ms-token" },
-    account: { externalId: "7001", ...NOW_ACCOUNT },
+    account: { externalId: "7001", ...NOW_ACCOUNT, meta: { customerId: 9001 } },
     respond: microsoftRespond,
     // Child entities are Active under a Paused campaign: the campaign status gates delivery.
     statusIgnore: [/ \/CampaignManagement\/v13\/(AdGroups|Ads|Keywords|AssetGroups)\b/],

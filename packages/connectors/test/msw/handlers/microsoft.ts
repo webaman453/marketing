@@ -4,9 +4,9 @@
  *    and https://learn.microsoft.com/entra/identity-platform/v2-oauth2-auth-code-flow (token response fields)
  *  - Campaigns/QueryByAccountId (REST URL, body, Campaigns[] response):
  *    https://learn.microsoft.com/advertising/campaign-management-service/getcampaignsbyaccountid
- *  - Customer Management (User/Query, AccountsInfo/Query, Account/Query):
+ *  - Customer Management (User/Query, Accounts/Search, Account/Query):
  *    https://learn.microsoft.com/advertising/customer-management-service/getuser
- *    https://learn.microsoft.com/advertising/customer-management-service/getaccountsinfo
+ *    https://learn.microsoft.com/advertising/customer-management-service/searchaccounts
  *    https://learn.microsoft.com/advertising/customer-management-service/getaccount
  *  - Reporting Submit/Poll (Status: Error | Pending | Success; ReportDownloadUrl nil when no data):
  *    https://learn.microsoft.com/advertising/reporting-service/submitgeneratereport

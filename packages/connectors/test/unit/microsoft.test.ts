@@ -121,41 +121,46 @@ describe("Microsoft OAuth", () => {
 });
 
 describe("Microsoft ad accounts", () => {
-  const info = { AccountsInfo: [{ Id: 149123456, Name: "Ashniva India", Number: "F149ABCD", AccountLifeCycleStatus: "Active", PauseReason: null }, { Id: 149000002, Name: null, Number: "F1490002", AccountLifeCycleStatus: "Pause" }] };
-  const details: Record<string, unknown> = {
-    "149123456": { Account: { Id: 149123456, Name: "Ashniva India", CurrencyCode: "INR", TimeZone: "ChennaiKolkataMumbaiNewDelhi", ParentCustomerId: 251000 } },
-    "149000002": { Account: { Id: 149000002, Name: "Second", CurrencyCode: "USD", TimeZone: "EasternTimeUSCanada", ParentCustomerId: 251001 } },
+  const accounts = {
+    Accounts: [
+      { Id: 149123456, Name: "Ashniva India", Number: "F149ABCD", CurrencyCode: "INR", TimeZone: "ChennaiKolkataMumbaiNewDelhi", AccountLifeCycleStatus: "Active", ParentCustomerId: 251000 },
+      { Id: 149000002, Name: null, Number: "F1490002", CurrencyCode: "USD", TimeZone: "EasternTimeUSCanada", AccountLifeCycleStatus: "Pause", ParentCustomerId: 251001 },
+    ],
   };
   const handlers = () => [
-    msPost(MS_CUSTOMER, "/AccountsInfo/Query", info),
-    http.post(`${MS_CUSTOMER}/Account/Query`, async ({ request }) => HttpResponse.json(details[String(((await request.json()) as { AccountId: number }).AccountId)] as never)),
+    msPost(MS_CUSTOMER, "/User/Query", { User: { Id: 9001, UserName: "asha@contoso.com", Name: { FirstName: "Asha", LastName: "Rao" } } }),
+    msPost(MS_CUSTOMER, "/Accounts/Search", accounts),
   ];
 
-  it("lists accounts with currency, customer id and number from Account/Query", async () => {
+  it("lists accounts with currency, customer id and number from Accounts/Search", async () => {
     server.use(...handlers());
     const list = await ms().listAdAccounts(auth());
     expect(list).toEqual([
       { externalId: "149123456", name: "Ashniva India", currency: "INR", timezone: expect.any(String), status: "Active", meta: { customerId: 251000, number: "F149ABCD" } },
-      { externalId: "149000002", name: "Second", currency: "USD", timezone: expect.any(String), status: "Pause", meta: { customerId: 251001, number: "F1490002" } },
+      { externalId: "149000002", name: "Microsoft Ads 149000002", currency: "USD", timezone: expect.any(String), status: "Pause", meta: { customerId: 251001, number: "F1490002" } },
     ]);
-    expect((await onlyHit({ path: "/AccountsInfo/Query" })).json).toEqual({ CustomerId: null, OnlyParentAccounts: false });
-    expect((await hits({ path: "/Account/Query" })).map((h) => h.json)).toEqual([{ AccountId: 149123456 }, { AccountId: 149000002 }]);
+    expect((await onlyHit({ path: "/Accounts/Search" })).json).toEqual({
+      Predicates: [{ Field: "UserId", Operator: "Equals", Value: "9001" }],
+      Ordering: [{ Field: "Id", Order: "Ascending" }],
+      PageInfo: { Index: 0, Size: 1000 },
+    });
   });
 
-  it.each([[401, "AUTH_EXPIRED"], [429, "RATE_LIMITED"], [500, "PLATFORM_ERROR"]])("an AccountsInfo %i propagates as %s (no empty list)", async (status, code) => {
-    server.use(http.post(`${MS_CUSTOMER}/AccountsInfo/Query`, () => msAdApiFault(status, 0, "x", "fault")));
+  it.each([[401, "AUTH_EXPIRED"], [429, "RATE_LIMITED"], [500, "PLATFORM_ERROR"]])("an Accounts/Search %i propagates as %s (no empty list)", async (status, code) => {
+    server.use(msPost(MS_CUSTOMER, "/User/Query", { User: { Id: 1 } }));
+    server.use(http.post(`${MS_CUSTOMER}/Accounts/Search`, () => msAdApiFault(status, 0, "x", "fault")));
     await expect(ms().listAdAccounts(auth())).rejects.toMatchObject({ code });
   });
 
-  it("BUG: an expired login on Account/Query propagates instead of listing the account in USD (src/microsoft/index.ts:162)", async () => {
+  it("an expired login on Accounts/Search propagates", async () => {
     server.use(...handlers());
-    server.use(http.post(`${MS_CUSTOMER}/Account/Query`, () => msAdApiFault(401, 105, "InvalidCredentials", "Authentication failed.")));
+    server.use(http.post(`${MS_CUSTOMER}/Accounts/Search`, () => msAdApiFault(401, 105, "InvalidCredentials", "Authentication failed.")));
     await expect(ms().listAdAccounts(auth())).rejects.toMatchObject({ code: "AUTH_EXPIRED" });
   });
 
   // AccountRef.timezone is documented as IANA (types.ts) and createCampaign maps IANA → Microsoft names,
-  // but listAdAccounts stores Microsoft's own TimeZone enum, so the account's zone is lost on create.
-  it("BUG: an account listed in ChennaiKolkataMumbaiNewDelhi creates campaigns in that zone, not EasternTimeUSCanada (index.ts:168 / builder.ts:155)", async () => {
+  // but listAdAccounts must store an IANA zone so create keeps the account's zone.
+  it("an account listed in ChennaiKolkataMumbaiNewDelhi creates campaigns in that zone, not EasternTimeUSCanada", async () => {
     server.use(...handlers());
     const [listed] = await ms().listAdAccounts(auth());
     server.use(msPost(MS_CAMPAIGN, "/Campaigns", { CampaignIds: [111], PartialErrors: [] }), msPost(MS_CAMPAIGN, "/CampaignCriterions", { CampaignCriterionIds: [1], NestedPartialErrors: [] }));
@@ -164,6 +169,19 @@ describe("Microsoft ad accounts", () => {
     await ms().createCampaign(auth(), { externalId: listed!.externalId, currency: listed!.currency, timezone: listed!.timezone, meta: listed!.meta }, d, new Map());
     const body = (await onlyHit({ path: "/CampaignManagement/v13/Campaigns" })).json;
     expect(body.Campaigns[0].TimeZone).toBe("ChennaiKolkataMumbaiNewDelhi");
+  });
+
+  it("resolves a missing customer id via Accounts/Search before campaign calls", async () => {
+    server.use(
+      msPost(MS_CUSTOMER, "/Accounts/Search", { Accounts: [{ Id: 149123456, ParentCustomerId: 251000 }] }),
+      msPost(MS_CAMPAIGN, "/Campaigns/QueryByAccountId", { Campaigns: [] }),
+    );
+    await ms().fetchStructure(auth(), account(ACCT, { meta: {} }));
+    expect((await onlyHit({ path: "/Accounts/Search" })).json).toEqual({
+      Predicates: [{ Field: "AccountId", Operator: "Equals", Value: ACCT }],
+      PageInfo: { Index: 0, Size: 1 },
+    });
+    expect((await onlyHit({ path: "/Campaigns/QueryByAccountId" })).headers.get("customerid")).toBe("251000");
   });
 });
 
