@@ -240,8 +240,12 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
     const { Campaigns = [] } = await this.api<{ Campaigns?: Row[] }>(
       `${CAMPAIGN_API}/Campaigns/QueryByAccountId`,
       auth,
-      // REST flag enums are comma/array, not SOAP space-separated — space form yields NullRequest.
-      { AccountId: accountId, CampaignType: ["Search", "Shopping", "Audience", "PerformanceMax"] },
+      // REST CampaignType is a flags enum: comma-separated string on the wire (msads CampaignType.php).
+      // SOAP used spaces; a JSON array also fails to bind and returns NullRequest.
+      {
+        AccountId: String(accountId),
+        CampaignType: "Search,Shopping,Audience,PerformanceMax",
+      },
       account,
     );
     const structure: AccountStructure = { campaigns: [], adGroups: [], ads: [] };

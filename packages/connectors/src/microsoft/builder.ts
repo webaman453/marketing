@@ -63,7 +63,7 @@ async function locationIds(api: MicrosoftApi, list: TargetingValue[]) {
 }
 
 export async function microsoftBuilderOptions(api: MicrosoftApi, accountId: string): Promise<BuilderOptions> {
-  const goals = await api.call<{ ConversionGoals?: Row[] }>("/ConversionGoals/QueryByIds", { ConversionGoalTypes: "Url Event Duration PagesViewedPerVisit AppInstall OfflineConversion InStoreTransaction", ReturnAdditionalFields: null, AccountId: Number(accountId) }).catch(() => ({ ConversionGoals: [] }));
+  const goals = await api.call<{ ConversionGoals?: Row[] }>("/ConversionGoals/QueryByIds", { ConversionGoalTypes: "Url,Event,Duration,PagesViewedPerVisit,AppInstall,OfflineConversion,InStoreTransaction", AccountId: Number(accountId) }).catch(() => ({ ConversionGoals: [] }));
   return { conversionActions: (goals.ConversionGoals ?? []).map((g) => ({ id: String(g.Id), name: g.Name ?? String(g.Id), detail: g.Type })) };
 }
 
