@@ -51,7 +51,12 @@ export async function enqueueSync(connectionId: string, trigger: SyncTrigger) {
   const existing = await queue.getJob(jobId);
   if (existing) {
     const state = await existing.getState();
-    if (state === "failed" || state === "completed") await existing.remove().catch(() => undefined);
+    // Active means a worker is already syncing this connection — don't stack another.
+    // Waiting/delayed jobs are replaced so a stuck "Queued" row can be re-kicked.
+    if (state === "active") return;
+    if (state === "failed" || state === "completed" || state === "waiting" || state === "delayed" || state === "paused") {
+      await existing.remove().catch(() => undefined);
+    }
   }
   await queue.add("connection", { connectionId, trigger }, { jobId });
 }

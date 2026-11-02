@@ -630,7 +630,7 @@ function ConnectionsSection() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem
-                          disabled={c.syncStatus === "RUNNING" || c.syncStatus === "QUEUED"}
+                          disabled={c.syncStatus === "RUNNING"}
                           onSelect={() => sync(c)}
                         >
                           <RefreshCw /> Sync now
