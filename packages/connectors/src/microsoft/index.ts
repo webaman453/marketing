@@ -115,15 +115,32 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
   };
 
   private api<T>(url: string, auth: ConnectorAuth, body: unknown, account?: AccountRef, method: "POST" | "PUT" | "DELETE" = "POST") {
+    if (!this.config.developerToken) {
+      throw new ConnectorError("NOT_CONFIGURED", "Microsoft Advertising developer token is missing. Paste it in Platform admin → API keys.");
+    }
     const headers: Record<string, string> = {
       Authorization: `Bearer ${auth.accessToken}`,
-      DeveloperToken: this.config.developerToken ?? "",
+      DeveloperToken: this.config.developerToken,
     };
     if (account) {
       headers.CustomerAccountId = account.externalId;
       if (account.meta?.customerId) headers.CustomerId = String(account.meta.customerId);
     }
     return requestJson<T>(url, { method, headers, body }, this.mapError);
+  }
+
+  /** Campaign and reporting calls need CustomerId. Older connections may not have saved it. */
+  private async withCustomer(auth: ConnectorAuth, account: AccountRef): Promise<AccountRef> {
+    if (account.meta?.customerId) return account;
+    const { Account: a = {} } = await this.api<{ Account?: Row }>(`${CUSTOMER_API}/Account/Query`, auth, { AccountId: Number(account.externalId) });
+    const customerId = a.ParentCustomerId;
+    if (customerId == null || customerId === "") {
+      throw new ConnectorError(
+        "INVALID_REQUEST",
+        "Microsoft Ads could not find the customer id for this account. Disconnect and connect Microsoft Ads again.",
+      );
+    }
+    return { ...account, meta: { ...(account.meta ?? {}), customerId } };
   }
 
   getAuthUrl({ state, redirectUri }: { state: string; redirectUri: string }) {
@@ -199,6 +216,7 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
   }
 
   async fetchStructure(auth: ConnectorAuth, account: AccountRef): Promise<AccountStructure> {
+    account = await this.withCustomer(auth, account);
     const accountId = Number(account.externalId);
     const { Campaigns = [] } = await this.api<{ Campaigns?: Row[] }>(
       `${CAMPAIGN_API}/Campaigns/QueryByAccountId`,
@@ -265,6 +283,7 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
 
   /** Submits a report, waits for it, and returns its rows. */
   private async runReport(auth: ConnectorAuth, account: AccountRef, type: string, columns: string[], range: { from: string; to: string }) {
+    account = await this.withCustomer(auth, account);
     const [fy, fm, fd] = range.from.split("-").map(Number);
     const [ty, tm, td] = range.to.split("-").map(Number);
     const submit = await this.api<{ ReportRequestId: string }>(
@@ -354,6 +373,7 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
   }
 
   async setCampaignStatus(auth: ConnectorAuth, account: AccountRef, campaign: { externalId: string }, status: "ACTIVE" | "PAUSED") {
+    account = await this.withCustomer(auth, account);
     await this.updateCampaign(auth, account, { Id: Number(campaign.externalId), Status: status === "ACTIVE" ? "Active" : "Paused" });
   }
 
@@ -376,6 +396,7 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
     if (campaign.raw?.budgetId) {
       throw new ConnectorError("UNSUPPORTED", "This campaign uses a shared budget. Edit it in Microsoft Advertising.");
     }
+    account = await this.withCustomer(auth, account);
     await this.updateCampaign(auth, account, { Id: Number(campaign.externalId), DailyBudget: amount });
   }
 
@@ -391,20 +412,23 @@ export class MicrosoftAdsConnector implements AdPlatformConnector {
     };
   }
 
-  getBuilderOptions(auth: ConnectorAuth, account: AccountRef): Promise<BuilderOptions> {
+  async getBuilderOptions(auth: ConnectorAuth, account: AccountRef): Promise<BuilderOptions> {
+    account = await this.withCustomer(auth, account);
     return microsoftBuilderOptions(this.builderApi(auth, account), account.externalId);
   }
 
-  searchTargeting(auth: ConnectorAuth, account: AccountRef, kind: TargetingKind, query: string): Promise<TargetingSearchResult[]> {
+  async searchTargeting(auth: ConnectorAuth, account: AccountRef, kind: TargetingKind, query: string): Promise<TargetingSearchResult[]> {
+    account = await this.withCustomer(auth, account);
     return microsoftSearchTargeting(this.builderApi(auth, account), kind, query);
   }
 
-  createCampaign(
+  async createCampaign(
     auth: ConnectorAuth,
     account: AccountRef & { currency: string; timezone?: string | null },
     draft: BuilderDraft,
     assets: Map<string, BuilderAsset>,
   ): Promise<AccountStructure> {
+    account = { ...account, ...(await this.withCustomer(auth, account)) };
     return microsoftCreateCampaign(this.builderApi(auth, account), account, draft, assets);
   }
 }
