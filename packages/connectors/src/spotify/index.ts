@@ -85,9 +85,11 @@ export class SpotifyAdsConnector implements AdPlatformConnector {
   }
 
   async listAdAccounts(auth: ConnectorAuth): Promise<ExternalAdAccount[]> {
+    // GET /businesses/{id}/ad_accounts has no limit/offset (OpenAPI); paging params return 400.
     const accounts: ExternalAdAccount[] = [];
     for (const business of (await this.businesses(auth)).businesses ?? []) {
-      for (const account of await this.listAll(`/businesses/${business.id}/ad_accounts`, "ad_accounts", auth)) {
+      const res = await this.call<{ ad_accounts?: Row[] }>(`/businesses/${business.id}/ad_accounts`, auth);
+      for (const account of res.ad_accounts ?? []) {
         accounts.push({
           externalId: String(account.id),
           name: account.name ?? String(account.id),

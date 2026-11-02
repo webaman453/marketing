@@ -15,11 +15,14 @@ export function apiError(label: string) {
     const b = body as {
       error_description?: string;
       message?: string;
+      /** Spotify Ads API ErrorResponse uses `messages: string[]`. */
+      messages?: string[];
       error?: string | { message?: string; error_user_msg?: string };
       errors?: { message?: string }[];
     };
     const nested = typeof b?.error === "string" ? b.error : b?.error?.error_user_msg ?? b?.error?.message;
-    const msg = b?.error_description ?? nested ?? b?.errors?.[0]?.message ?? b?.message ?? `${label} error (${status})`;
+    const fromMessages = Array.isArray(b?.messages) ? b.messages.filter(Boolean).join("; ") : undefined;
+    const msg = b?.error_description ?? nested ?? fromMessages ?? b?.errors?.[0]?.message ?? b?.message ?? `${label} error (${status})`;
     return new ConnectorError(codeFromStatus(status), msg, body);
   };
 }

@@ -93,7 +93,7 @@ describe("Spotify account reads", () => {
     await expect(sp().listAdAccounts(auth())).rejects.toThrow(/Ads API/);
   });
 
-  it("listAdAccounts walks every business and maps currency, timezone and INACTIVE status", async () => {
+  it("listAdAccounts walks every business without limit/offset (Ads API rejects those on this path)", async () => {
     server.use(...spotifyHandlers(spotifyData({
       businesses: [{ id: "biz-1", name: "A" }, { id: "biz-2", name: "B" }],
       adAccounts: {
@@ -105,6 +105,14 @@ describe("Spotify account reads", () => {
       { externalId: "acc-1", name: "IN", currency: "INR", timezone: "Asia/Kolkata", status: "ACTIVE", meta: { businessId: "biz-1" } },
       { externalId: "acc-2", name: "acc-2", currency: "USD", timezone: null, status: "PAUSED", meta: { businessId: "biz-2" } },
     ]);
+    for (const h of await hits({ path: /\/ad_accounts$/ })) {
+      expect(h.url.search).toBe("");
+    }
+  });
+
+  it("surfaces Spotify Ads ErrorResponse.messages on 400", async () => {
+    server.use(http.get(`${SPOTIFY_API}/businesses`, () => fail(400, { messages: ["Client ID is not allowlisted for Ads API"], sp_trace_id: "t1" })));
+    await expect(sp().listAdAccounts(auth())).rejects.toMatchObject({ code: "INVALID_REQUEST", message: "Client ID is not allowlisted for Ads API" });
   });
 
   it("listAdAccounts propagates an error from one business instead of returning a shorter list", async () => {
