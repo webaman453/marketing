@@ -224,7 +224,7 @@ describe("Microsoft structure", () => {
     expect(s.ads[1]).toMatchObject({ externalId: "1300002~8100002", name: "ResponsiveAd #8100002", status: "PAUSED" });
 
     const q = await onlyHit({ path: "/Campaigns/QueryByAccountId" });
-    expect(q.json).toEqual({ AccountId: 149123456, CampaignType: "Search Shopping Audience PerformanceMax" });
+    expect(q.json).toEqual({ AccountId: 149123456, CampaignType: ["Search", "Shopping", "Audience", "PerformanceMax"] });
     expect(q.headers.get("customeraccountid")).toBe(ACCT);
     expect(q.headers.get("customerid")).toBe("251000");
     expect(q.headers.get("developertoken")).toBe("dev-tok");
