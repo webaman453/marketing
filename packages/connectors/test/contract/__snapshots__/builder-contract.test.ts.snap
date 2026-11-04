@@ -353,11 +353,8 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > review list: optiona
     "ad:squareImages": "62/115 runs",
   },
   "unreadVisible": {
-    "adGroup:audienceSignals": "12/115 runs",
     "adGroup:audiences": "30/115 runs",
     "adGroup:optimizedTargeting": "30/115 runs",
-    "campaign:audienceSegments": "44/115 runs",
-    "campaign:customerAcquisition": "56/115 runs",
     "campaign:devices": "12/115 runs",
   },
 }
@@ -1307,6 +1304,37 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup LEADS / PERFOR
               },
             },
           },
+          {
+            "audienceOperation": {
+              "create": {
+                "dimensions": [
+                  {
+                    "audienceSegments": {
+                      "segments": [
+                        {
+                          "userInterest": {
+                            "userInterestCategory": "customers/1234567890/userInterests/interest-1",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                "name": "Ad group 1 signal mvz38740",
+                "resourceName": "customers/1234567890/audiences/-12",
+              },
+            },
+          },
+          {
+            "assetGroupSignalOperation": {
+              "create": {
+                "assetGroup": "customers/1234567890/assetGroups/-4",
+                "audience": {
+                  "audience": "customers/1234567890/audiences/-12",
+                },
+              },
+            },
+          },
         ],
       },
       "request": "POST googleads.googleapis.com/v22/customers/1234567890/googleAds:mutate",
@@ -1383,6 +1411,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup LEADS / SEARCH
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -1597,6 +1635,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup LEADS / SHOPPI
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -1978,6 +2026,37 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup LOCAL_STORE_VI
                 "assetGroup": "customers/1234567890/assetGroups/-4",
                 "searchTheme": {
                   "text": "1 Search theme",
+                },
+              },
+            },
+          },
+          {
+            "audienceOperation": {
+              "create": {
+                "dimensions": [
+                  {
+                    "audienceSegments": {
+                      "segments": [
+                        {
+                          "userInterest": {
+                            "userInterestCategory": "customers/1234567890/userInterests/interest-1",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                "name": "Ad group 1 signal mvz38740",
+                "resourceName": "customers/1234567890/audiences/-12",
+              },
+            },
+          },
+          {
+            "assetGroupSignalOperation": {
+              "create": {
+                "assetGroup": "customers/1234567890/assetGroups/-4",
+                "audience": {
+                  "audience": "customers/1234567890/audiences/-12",
                 },
               },
             },
@@ -2934,6 +3013,37 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup NONE / PERFORM
               },
             },
           },
+          {
+            "audienceOperation": {
+              "create": {
+                "dimensions": [
+                  {
+                    "audienceSegments": {
+                      "segments": [
+                        {
+                          "userInterest": {
+                            "userInterestCategory": "customers/1234567890/userInterests/interest-1",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                "name": "Ad group 1 signal mvz38740",
+                "resourceName": "customers/1234567890/audiences/-12",
+              },
+            },
+          },
+          {
+            "assetGroupSignalOperation": {
+              "create": {
+                "assetGroup": "customers/1234567890/assetGroups/-4",
+                "audience": {
+                  "audience": "customers/1234567890/audiences/-12",
+                },
+              },
+            },
+          },
         ],
       },
       "request": "POST googleads.googleapis.com/v22/customers/1234567890/googleAds:mutate",
@@ -3010,6 +3120,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup NONE / SEARCH 
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -3224,6 +3344,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup NONE / SHOPPIN
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -4063,6 +4193,37 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup SALES / PERFOR
               },
             },
           },
+          {
+            "audienceOperation": {
+              "create": {
+                "dimensions": [
+                  {
+                    "audienceSegments": {
+                      "segments": [
+                        {
+                          "userInterest": {
+                            "userInterestCategory": "customers/1234567890/userInterests/interest-1",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                "name": "Ad group 1 signal mvz38740",
+                "resourceName": "customers/1234567890/audiences/-12",
+              },
+            },
+          },
+          {
+            "assetGroupSignalOperation": {
+              "create": {
+                "assetGroup": "customers/1234567890/assetGroups/-4",
+                "audience": {
+                  "audience": "customers/1234567890/audiences/-12",
+                },
+              },
+            },
+          },
         ],
       },
       "request": "POST googleads.googleapis.com/v22/customers/1234567890/googleAds:mutate",
@@ -4139,6 +4300,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup SALES / SEARCH
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -4353,6 +4524,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup SALES / SHOPPI
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -4927,6 +5108,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup WEBSITE_TRAFFI
             },
           },
           {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
+                },
+              },
+            },
+          },
+          {
             "adGroupOperation": {
               "create": {
                 "campaign": "customers/1234567890/campaigns/-2",
@@ -5136,6 +5327,16 @@ exports[`GOOGLE: builder form ↔ createCampaign contract > setup WEBSITE_TRAFFI
                 "campaign": "customers/1234567890/campaigns/-2",
                 "language": {
                   "languageConstant": "languageConstants/1000",
+                },
+              },
+            },
+          },
+          {
+            "campaignCriterionOperation": {
+              "create": {
+                "campaign": "customers/1234567890/campaigns/-2",
+                "userInterest": {
+                  "userInterestCategory": "customers/1234567890/userInterests/interest-1",
                 },
               },
             },
@@ -9642,10 +9843,8 @@ exports[`META: builder form ↔ createCampaign contract > review list: optional 
 {
   "crossSetupReads": {},
   "unreadVisible": {
-    "ad:displayLink": "3/60 runs",
-    "ad:greeting": "4/60 runs",
-    "ad:quickReplies": "4/60 runs",
-    "campaign:buyingType": "60/60 runs",
+    "ad:displayLink": "3/65 runs",
+    "campaign:buyingType": "65/65 runs",
   },
 }
 `;
@@ -10551,6 +10750,7 @@ exports[`META: builder form ↔ createCampaign contract > setup OUTCOME_SALES > 
         "promoted_object": {
           "custom_event_type": "PURCHASE",
           "pixel_id": "pixels-1",
+          "product_set_id": "productSets-1",
         },
         "start_time": "2026-12-01T03:30:00.000Z",
         "status": "PAUSED",
@@ -10594,112 +10794,25 @@ exports[`META: builder form ↔ createCampaign contract > setup OUTCOME_SALES > 
     },
     {
       "body": {
-        "bytes": "Ynl0ZXMtb2YtY3ItMQ==",
-      },
-      "request": "POST graph.facebook.com/v26.0/act_1001/adimages",
-    },
-    {
-      "body": {
-        "bytes": "Ynl0ZXMtb2YtY3ItMg==",
-      },
-      "request": "POST graph.facebook.com/v26.0/act_1001/adimages",
-    },
-    {
-      "body": {
-        "asset_feed_spec": {
-          "ad_formats": [
-            "SINGLE_IMAGE",
-          ],
-          "asset_customization_rules": [
-            {
-              "customization_spec": {
-                "facebook_positions": [
-                  "feed",
-                  "marketplace",
-                  "search",
-                ],
-                "instagram_positions": [
-                  "stream",
-                  "explore_home",
-                ],
-                "publisher_platforms": [
-                  "facebook",
-                  "instagram",
-                ],
-              },
-              "image_label": {
-                "name": "feed",
-              },
-            },
-            {
-              "customization_spec": {
-                "facebook_positions": [
-                  "story",
-                  "facebook_reels",
-                ],
-                "instagram_positions": [
-                  "story",
-                  "reels",
-                ],
-                "publisher_platforms": [
-                  "facebook",
-                  "instagram",
-                ],
-              },
-              "image_label": {
-                "name": "story",
-              },
-            },
-          ],
-          "bodies": [
-            {
-              "text": "1 Primary text",
-            },
-          ],
-          "call_to_action_types": [
-            "SHOP_NOW",
-          ],
-          "descriptions": [
-            {
-              "text": "1 Description",
-            },
-          ],
-          "images": [
-            {
-              "adlabels": [
-                {
-                  "name": "feed",
-                },
-              ],
-              "hash": "hash-1",
-            },
-            {
-              "adlabels": [
-                {
-                  "name": "story",
-                },
-              ],
-              "hash": "hash-1",
-            },
-          ],
-          "link_urls": [
-            {
-              "display_url": "example.com",
-              "website_url": "https://www.example.com/url",
-            },
-          ],
-          "optimization_type": "PLACEMENT",
-          "titles": [
-            {
-              "text": "1 Headline",
-            },
-          ],
-        },
         "name": "Ad 1",
         "object_story_spec": {
           "instagram_user_id": "ig-1",
           "page_id": "page-1",
+          "template_data": {
+            "call_to_action": {
+              "type": "SHOP_NOW",
+              "value": {
+                "link": "https://www.example.com/url",
+              },
+            },
+            "description": "1 Description",
+            "link": "https://www.example.com/url",
+            "message": "1 Primary text",
+            "multi_share_optimized": true,
+            "name": "1 Headline",
+          },
         },
+        "product_set_id": "productSets-1",
         "url_tags": "utm_source=contract&utm_medium=paid",
       },
       "request": "POST graph.facebook.com/v26.0/act_1001/adcreatives",

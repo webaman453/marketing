@@ -302,6 +302,46 @@ describe("Meta createCampaign", () => {
     expect(parsed(cr, "object_story_spec")).toEqual({ page_id: "page-1", instagram_user_id: "ig-1" });
   });
 
+  it("promotes an existing Page post with object_story_id and no media", async () => {
+    server.use(...metaCreateHandlers());
+    const draft = trafficDraft({ ad: { format: "EXISTING_POST", postId: "page-1_555", urlParams: "utm_source=meta" } });
+    await meta().createCampaign(auth(), ACT, draft, assetsOf());
+    const cr = await onlyHit({ path: "/act_42/adcreatives" });
+    expect(form(cr)).toMatchObject({ object_story_id: "page-1_555", url_tags: "utm_source=meta" });
+    expect(form(cr).object_story_spec).toBeUndefined();
+  });
+
+  it("refuses an existing-post ad without a post ID, and rolls back", async () => {
+    server.use(...metaCreateHandlers());
+    const draft = trafficDraft({ ad: { format: "EXISTING_POST" } });
+    draft.adGroups[0]!.ads[0]!.values.postId = ""; // makeDraft fills required fields, so clear it afterwards
+    const err = await errorOf(meta().createCampaign(auth(), ACT, draft, assetsOf()));
+    expect(err?.code).toBe("INVALID_REQUEST");
+  });
+
+  it("builds catalog ads from a product set: promoted_object.product_set_id and a template_data creative", async () => {
+    server.use(...metaCreateHandlers());
+    const draft = makeDraft("META", { objective: "OUTCOME_SALES" }, {
+      adGroup: { locations: [{ id: "IN", name: "India", type: "country" }], conversionLocation: "WEBSITE", optimizationGoal: "OFFSITE_CONVERSIONS", pixelId: "px-1", conversionEvent: "PURCHASE", productSetId: "set-9" },
+      ad: { pageId: "page-1", url: "https://shop.example.com", primaryTexts: ["Our best sellers"], cta: "SHOP_NOW" },
+    });
+    await meta().createCampaign(auth(), ACT, draft, assetsOf());
+    const set = await onlyHit({ method: "POST", path: "/act_42/adsets" });
+    expect(parsed(set, "promoted_object")).toEqual({ pixel_id: "px-1", custom_event_type: "PURCHASE", product_set_id: "set-9" });
+    const cr = await onlyHit({ path: "/act_42/adcreatives" });
+    expect(form(cr).product_set_id).toBe("set-9");
+    expect(parsed(cr, "object_story_spec").template_data).toMatchObject({ link: "https://shop.example.com", message: "Our best sellers", name: "{{product.name}}", call_to_action: { type: "SHOP_NOW" } });
+  });
+
+  it("lists the product sets of the account's catalogs for the builder", async () => {
+    server.use(
+      http.get(`${GRAPH}/act_42/product_catalogs`, () => HttpResponse.json({ data: [{ id: "cat-1", name: "Zari store" }] })),
+      http.get(`${GRAPH}/cat-1/product_sets`, () => HttpResponse.json({ data: [{ id: "set-9", name: "Best sellers", product_count: 1240 }] })),
+    );
+    const o = await meta().getBuilderOptions(auth(), ACT);
+    expect(o.productSets).toEqual([{ id: "set-9", name: "Best sellers", detail: expect.stringContaining("Zari store") }]);
+  });
+
   it("refuses a CBO campaign without a budget before calling Meta", async () => {
     const draft = trafficDraft();
     draft.campaign.budget = 0;

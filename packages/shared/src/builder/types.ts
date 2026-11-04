@@ -41,6 +41,7 @@ export type AccountOptionKind =
   | "youtubeChannels"
   | "apps"
   | "catalogs"
+  | "productSets"
   | "merchantCenters"
   | "audiences"
   | "boards";

@@ -217,6 +217,9 @@ const pixelNeeded = all(
   adGroupIs("optimizationGoal", "OFFSITE_CONVERSIONS", "VALUE"),
 );
 const appNeeded = any(isObjective("OUTCOME_APP_PROMOTION"), adGroupIs("conversionLocation", "APP", "WEBSITE_AND_APP"));
+/** An ad set that promotes a catalog's products makes catalog ads: no media, the products fill the template. */
+const catalogAds: (ctx: FieldContext) => boolean = (ctx) => ctx.setup.objective === "OUTCOME_SALES" && ctx.adGroup.conversionLocation === "WEBSITE" && Boolean(ctx.adGroup.productSetId);
+const adFormat = (f: string) => all(not(catalogAds), adIs("format", f));
 const bidNeedsAmount = (where: "campaign" | "adGroup") => (ctx: FieldContext) =>
   ["COST_CAP", "LOWEST_COST_WITH_BID_CAP"].includes(String(ctx[where].bidStrategy));
 const bidNeedsRoas = (where: "campaign" | "adGroup") => (ctx: FieldContext) => ctx[where].bidStrategy === "LOWEST_COST_WITH_MIN_ROAS";
@@ -307,6 +310,14 @@ export const metaSpec: PlatformBuilderSpec = {
         fields: [
           { key: "conversionLocation", type: "radio", label: "Conversion location", options: metaLocations, default: (ctx) => metaLocations(ctx)[0]?.value ?? "", showIf: (ctx) => metaLocations(ctx).length > 0 },
           { key: "appId", type: "accountOption", source: "apps", label: "App", required: true, showIf: appNeeded, autoSelect: true },
+          {
+            key: "productSetId",
+            type: "accountOption",
+            source: "productSets",
+            label: "Catalog product set",
+            help: "Optional. Show products from your catalog with catalog ads (dynamic ads). Needs the Sales objective and a pixel.",
+            showIf: all(isObjective("OUTCOME_SALES"), adGroupIs("conversionLocation", "WEBSITE")),
+          },
           { key: "leadFormId", type: "accountOption", source: "leadForms", label: "Instant form", showIf: all(isObjective("OUTCOME_LEADS"), adGroupIs("conversionLocation", "ON_AD")), help: "Choose a form, or leave empty to create one in Ads Manager before going live." },
           {
             key: "messagingApps",
@@ -438,17 +449,20 @@ export const metaSpec: PlatformBuilderSpec = {
             options: [
               { value: "SINGLE", label: "Single image or video", description: "One image or video, or a slideshow.", icon: "Image" },
               { value: "CAROUSEL", label: "Carousel", description: "2 or more scrollable images or videos.", icon: "GalleryHorizontal" },
+              { value: "EXISTING_POST", label: "Existing post", description: "Promote a post already published on your Facebook Page.", icon: "Share2" },
             ],
             default: "SINGLE",
+            showIf: not(catalogAds),
           },
+          infoField("catalogInfo", "Catalog ads", "This ad set promotes products from your catalog, so Meta builds each ad from the product set. Add the text and link below.", "info", catalogAds),
         ],
       },
       {
         id: "creative",
         title: "Ad creative",
         fields: [
-          { key: "media", type: "media", label: "Media", accept: ["IMAGE", "VIDEO"], min: 1, max: 1, required: true, ratios: ["1:1", "4:5", "1.91:1"], showIf: adIs("format", "SINGLE"), specs: "Feeds: 1:1 or 4:5, at least 1080×1080 px. Video up to 241 minutes; 15 seconds or less works best." },
-          { key: "storyMedia", type: "media", label: "Stories and Reels version (optional)", accept: ["IMAGE", "VIDEO"], min: 0, max: 1, ratios: ["9:16"], requiredRatio: "9:16", showIf: adIs("format", "SINGLE"), help: "A 9:16 version used in Stories and Reels.", advanced: true },
+          { key: "media", type: "media", label: "Media", accept: ["IMAGE", "VIDEO"], min: 1, max: 1, required: true, ratios: ["1:1", "4:5", "1.91:1"], showIf: adFormat("SINGLE"), specs: "Feeds: 1:1 or 4:5, at least 1080×1080 px. Video up to 241 minutes; 15 seconds or less works best." },
+          { key: "storyMedia", type: "media", label: "Stories and Reels version (optional)", accept: ["IMAGE", "VIDEO"], min: 0, max: 1, ratios: ["9:16"], requiredRatio: "9:16", showIf: adFormat("SINGLE"), help: "A 9:16 version used in Stories and Reels.", advanced: true },
           {
             key: "cards",
             type: "repeater",
@@ -457,7 +471,7 @@ export const metaSpec: PlatformBuilderSpec = {
             min: 2,
             max: 10,
             required: true,
-            showIf: adIs("format", "CAROUSEL"),
+            showIf: adFormat("CAROUSEL"),
             fields: [
               { key: "media", type: "media", label: "Card media", accept: ["IMAGE", "VIDEO"], min: 1, max: 1, required: true, ratios: ["1:1"], specs: "1:1, 1080×1080 px" },
               { key: "headline", type: "text", label: "Headline", placeholder: "Shop the edit", maxLength: 255, recommendedLength: 32, ai: { purpose: "carousel card headline" } },
@@ -477,6 +491,7 @@ export const metaSpec: PlatformBuilderSpec = {
             recommendedLength: 125,
             multiline: true,
             required: true,
+            showIf: not(adFormat("EXISTING_POST")),
             help: "Add up to 5 options; Meta shows the one each person is most likely to respond to.",
             ai: { purpose: "Meta primary text: hook in the first 125 characters, benefit, call to action" },
           },
@@ -490,7 +505,7 @@ export const metaSpec: PlatformBuilderSpec = {
             initial: 1,
             maxLength: 255,
             recommendedLength: 40,
-            showIf: adIs("format", "SINGLE"),
+            showIf: any(adFormat("SINGLE"), catalogAds),
             ai: { purpose: "Meta headline under the image" },
           },
           {
@@ -503,10 +518,10 @@ export const metaSpec: PlatformBuilderSpec = {
             initial: 1,
             maxLength: 255,
             recommendedLength: 25,
-            showIf: adIs("format", "SINGLE"),
+            showIf: any(adFormat("SINGLE"), catalogAds),
             ai: { purpose: "short description shown below the headline" },
           },
-          { key: "cta", type: "select", label: "Call to action", options: metaCtaOptions, default: (ctx) => (ctx.setup.objective === "OUTCOME_SALES" ? "SHOP_NOW" : ctx.setup.objective === "OUTCOME_LEADS" ? "SIGN_UP" : ctx.setup.objective === "OUTCOME_APP_PROMOTION" ? "INSTALL_MOBILE_APP" : "LEARN_MORE") },
+          { key: "cta", type: "select", label: "Call to action", showIf: not(adFormat("EXISTING_POST")), options: metaCtaOptions, default: (ctx) => (ctx.setup.objective === "OUTCOME_SALES" ? "SHOP_NOW" : ctx.setup.objective === "OUTCOME_LEADS" ? "SIGN_UP" : ctx.setup.objective === "OUTCOME_APP_PROMOTION" ? "INSTALL_MOBILE_APP" : "LEARN_MORE") },
           {
             key: "enhancements",
             type: "toggle",
@@ -514,18 +529,28 @@ export const metaSpec: PlatformBuilderSpec = {
             description: "Let Meta adjust brightness, add music and pick the best text per person.",
             default: false,
             advanced: true,
+            showIf: not(any(adFormat("EXISTING_POST"), catalogAds)),
           },
+        ],
+      },
+      {
+        id: "post",
+        title: "Post",
+        showIf: adFormat("EXISTING_POST"),
+        fields: [
+          { key: "postId", type: "text", label: "Facebook post ID", required: true, placeholder: "1234567890_9876543210", maxLength: 100, help: "The post's ID in the form PageID_PostID. Open the post, then copy the numbers from its link. It must be published on the Page chosen above." },
         ],
       },
       {
         id: "destination",
         title: "Destination",
         showIf: (ctx) =>
+          !adFormat("EXISTING_POST")(ctx) &&
           ctx.setup.objective !== "OUTCOME_APP_PROMOTION" &&
           (!["ON_AD", "ON_PAGE", "MESSAGING", "PHONE_CALL", "INSTAGRAM_PROFILE", "APP"].includes(String(ctx.adGroup.conversionLocation ?? "")) || ctx.setup.objective === "OUTCOME_AWARENESS"),
         fields: [
-          urlField({ required: (ctx) => ctx.setup.objective !== "OUTCOME_AWARENESS" && ctx.ad.format !== "CAROUSEL", showIf: (ctx) => ctx.ad.format !== "CAROUSEL" }),
-          { key: "displayLink", type: "text", label: "Display link", placeholder: "yourstore.com", maxLength: 100, advanced: true, help: "A short link shown instead of the full URL." },
+          urlField({ required: (ctx) => ctx.setup.objective !== "OUTCOME_AWARENESS" && !adFormat("CAROUSEL")(ctx), showIf: (ctx) => !adFormat("CAROUSEL")(ctx) }),
+          { key: "displayLink", type: "text", label: "Display link", placeholder: "yourstore.com", maxLength: 100, advanced: true, showIf: not(catalogAds), help: "A short link shown instead of the full URL." },
           urlParamsField(),
         ],
       },
@@ -534,15 +559,6 @@ export const metaSpec: PlatformBuilderSpec = {
         title: "Call",
         showIf: adGroupIs("conversionLocation", "PHONE_CALL"),
         fields: [{ key: "phone", type: "text", label: "Phone number", required: true, placeholder: "+91 98765 43210", maxLength: 30 }],
-      },
-      {
-        id: "message",
-        title: "Message template",
-        showIf: adGroupIs("conversionLocation", "MESSAGING"),
-        fields: [
-          { key: "greeting", type: "textarea", label: "Greeting", maxLength: 300, rows: 2, placeholder: "Hi! Thanks for reaching out. How can we help?", ai: { purpose: "friendly chat greeting" } },
-          { key: "quickReplies", type: "textList", label: "Frequently asked questions", itemLabel: "Question", min: 0, max: 5, initial: 3, maxLength: 80, ai: { purpose: "questions a customer might tap" } },
-        ],
       },
     ],
   }),

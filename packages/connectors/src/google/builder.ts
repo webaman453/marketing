@@ -302,6 +302,13 @@ export async function googleCreateCampaign(
   };
   if (type !== "DEMAND_GEN") criteriaOn({ campaign: campaignRn }, "campaignCriterionOperation");
 
+  // Search/Shopping audience segments are observation only (the targeting setting defaults to bid-only), so reach isn't narrowed.
+  if (type === "SEARCH" || type === "SHOPPING") {
+    for (const i of included(c, "audienceSegments")) {
+      push({ campaignCriterionOperation: { create: { campaign: campaignRn, userInterest: { userInterestCategory: `customers/${cid}/userInterests/${i.id}` } } } });
+    }
+  }
+
   const schedule = (c.adSchedule as { days?: Record<string, [number, number][]> } | undefined)?.days ?? {};
   for (const [day, slots] of Object.entries(schedule)) {
     for (const [from, to] of slots) {
@@ -355,6 +362,21 @@ export async function googleCreateCampaign(
         link(rn, "CALL_TO_ACTION_SELECTION");
       }
       for (const theme of texts(v, "searchThemes")) push({ assetGroupSignalOperation: { create: { assetGroup: agRn, searchTheme: { text: theme } } } });
+      // Audience signals are an Audience resource (interest segments) attached to the asset group.
+      const signals = included(v, "audienceSignals");
+      if (signals.length) {
+        const audRn = temp("audiences");
+        push({
+          audienceOperation: {
+            create: {
+              resourceName: audRn,
+              name: `${str(v, "name")} signal ${Date.now().toString(36)}`.slice(0, 255),
+              dimensions: [{ audienceSegments: { segments: signals.map((i) => ({ userInterest: { userInterestCategory: `customers/${cid}/userInterests/${i.id}` } })) } }],
+            },
+          },
+        });
+        push({ assetGroupSignalOperation: { create: { assetGroup: agRn, audience: { audience: audRn } } } });
+      }
       continue;
     }
 

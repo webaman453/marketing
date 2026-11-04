@@ -183,19 +183,6 @@ const campaign: LevelSpec = {
           width: "half",
         },
         { key: "impressionShareTarget", type: "percent", label: "Percent (%) impression share to target", min: 1, max: 100, default: 70, showIf: bid("IMPRESSION_SHARE"), width: "half" },
-        {
-          key: "customerAcquisition",
-          type: "radio",
-          label: "Customer acquisition",
-          options: opts([
-            ["BID_EQUALLY", "Bid equally for new and existing customers"],
-            ["BID_HIGHER", "Bid higher for new customers than for existing customers"],
-            ["ONLY_NEW", "Only bid for new customers"],
-          ]),
-          default: "BID_EQUALLY",
-          showIf: type("SEARCH", "PERFORMANCE_MAX", "SHOPPING"),
-          advanced: true,
-        },
       ],
     },
     {

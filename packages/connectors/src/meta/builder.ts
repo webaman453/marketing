@@ -44,6 +44,20 @@ export async function metaBuilderOptions(api: MetaApi, act: string): Promise<Bui
     safe(api.get<{ data: (Named & { object_store_urls?: Record<string, string> })[] }>(`${act}/advertisable_applications`, { fields: "id,name,object_store_urls", limit: 100 })),
     safe(api.get<{ data: (Named & { approximate_count_lower_bound?: number; subtype?: string })[] }>(`${act}/customaudiences`, { fields: "id,name,subtype,approximate_count_lower_bound", limit: 200 })),
   ]);
+  // Catalog product sets (needs catalog_management; empty without it). Catalogs hang off the ad account or its Pages.
+  type Catalog = Named & { product_count?: number };
+  const catalogs = (
+    await safe(api.get<{ data: Catalog[] }>(`${act}/product_catalogs`, { fields: "id,name", limit: 25 }))
+  ).slice(0, 5);
+  const productSets = (
+    await Promise.all(
+      catalogs.map((cat) =>
+        safe(api.get<{ data: { id: string; name?: string; product_count?: number }[] }>(`/${cat.id}/product_sets`, { fields: "id,name,product_count", limit: 50 })).then((sets) =>
+          sets.map((s) => ({ id: s.id, name: s.name ?? s.id, detail: [cat.name, s.product_count != null ? `${s.product_count.toLocaleString("en-IN")} products` : null].filter(Boolean).join(" · ") })),
+        ),
+      ),
+    )
+  ).flat();
   // Lead forms belong to Pages; read them for the first few Pages.
   const leadForms = (
     await Promise.all(
@@ -63,6 +77,7 @@ export async function metaBuilderOptions(api: MetaApi, act: string): Promise<Bui
     }),
     audiences: audiences.map((a) => ({ id: a.id, name: a.name ?? a.id, detail: [a.subtype, a.approximate_count_lower_bound ? `≈ ${a.approximate_count_lower_bound.toLocaleString("en-IN")} people` : null].filter(Boolean).join(" · ") })),
     leadForms,
+    productSets,
   };
 }
 
@@ -157,7 +172,9 @@ function promotedObject(draft: BuilderDraft, group: Values, pageId: string | und
     out.application_id = id;
     if (store) out.object_store_url = store;
   }
-  if (!out.pixel_id && !out.application_id && pageId) out.page_id = pageId;
+  const productSet = str(group, "productSetId");
+  if (productSet && draft.setup.objective === "OUTCOME_SALES" && str(group, "conversionLocation") === "WEBSITE") out.product_set_id = productSet;
+  if (!out.pixel_id && !out.application_id && !out.product_set_id && pageId) out.page_id = pageId;
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -321,6 +338,33 @@ async function creativeSpec(api: MetaApi, act: string, draft: BuilderDraft, grou
     base.degrees_of_freedom_spec = {
       creative_features_spec: Object.fromEntries(["image_touchups", "image_brightness_and_contrast", "text_optimizations", "enhance_cta", "adapt_to_placement"].map((k) => [k, { enroll_status: "OPT_IN" }])),
     };
+  }
+
+  // An ad set built on a catalog product set makes catalog ads: Meta fills the template from each product.
+  const productSet = str(group, "productSetId");
+  if (productSet && draft.setup.objective === "OUTCOME_SALES" && loc === "WEBSITE") {
+    return {
+      ...base,
+      product_set_id: productSet,
+      object_story_spec: {
+        ...identity,
+        template_data: {
+          link: url,
+          message: bodies[0],
+          name: titles[0] || "{{product.name}}",
+          description: descriptions[0] || "{{product.current_price strip_zeros}}",
+          multi_share_optimized: true,
+          ...(callToAction ? { call_to_action: callToAction } : {}),
+        },
+      },
+    };
+  }
+
+  if (v.format === "EXISTING_POST") {
+    const postId = str(v, "postId");
+    if (!postId) throw new ConnectorError("INVALID_REQUEST", "Enter the Facebook post ID to promote.");
+    // A published post keeps its own text, media and button; the page and Instagram account come from the post.
+    return { name: base.name, object_story_id: postId, ...(base.url_tags ? { url_tags: base.url_tags } : {}) };
   }
 
   if (v.format === "CAROUSEL") {
