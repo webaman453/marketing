@@ -203,7 +203,10 @@ describe("Integrations · connections and ad accounts", () => {
     expect(await screen.findByText(/Asha BM/)).toBeInTheDocument();
     expect(screen.getByText("Syncing…")).toBeInTheDocument();
     expect(screen.getByText("Sync failed")).toBeInTheDocument();
-    expect(screen.getByText("Access expired · reconnect")).toBeInTheDocument();
+    // The reason is explained in plain words, with a way to fix it.
+    expect(screen.getByText("Access expired")).toBeInTheDocument();
+    expect(screen.getAllByText(/Reconnect this login to resume syncing/).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /Reconnect/ }).length).toBeGreaterThan(0);
     expect(screen.getByText("Queued")).toBeInTheDocument();
     expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.getByText(/Simulated account/)).toHaveTextContent("1 account");

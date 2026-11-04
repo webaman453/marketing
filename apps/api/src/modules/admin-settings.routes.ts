@@ -41,6 +41,7 @@ adminSettingsRouter.get("/credentials", async (_req, res) => {
   await loadPlatformSettings(true);
   const body: CredentialsDTO = {
     redirectUrls: Object.fromEntries(PLATFORMS.map((p) => [p, oauthRedirectUri(p)])) as Partial<Record<Platform, string>>,
+    slackRedirectUrl: `${publicBase()}/api/oauth/slack/callback`,
     webhookUrl: `${publicBase()}/api/billing/webhook/razorpay`,
     groups: credentialStatus(),
   };

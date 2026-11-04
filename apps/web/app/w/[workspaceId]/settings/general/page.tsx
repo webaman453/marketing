@@ -11,6 +11,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/app/workspace-context";
 import { FormField } from "@/components/form-field";
+import { AnomalySettingsCard } from "@/components/settings/anomaly-settings-card";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { WorkspaceForm } from "@/components/settings/workspace-form";
 import {
@@ -137,6 +138,8 @@ export default function GeneralSettingsPage() {
           }}
         />
       </SettingsCard>
+
+      <AnomalySettingsCard />
 
       <SettingsCard
         title={org.role === "OWNER" ? "Ownership" : "Leave organization"}

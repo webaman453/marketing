@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Building2, CreditCard, KeyRound, Layers, Palette, Sparkles, UserRound, Users } from "lucide-react";
+import { Bell, BellRing, Building2, CreditCard, KeyRound, Layers, Palette, Sparkles, UserRound, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PageHeader } from "@/components/app/page-header";
@@ -18,6 +18,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     { href: "workspaces", label: "Workspaces", icon: Layers, show: true },
     { href: "team", label: "Team", icon: Users, show: !client },
     { href: "branding", label: "Branding", icon: Palette, show: can("org:update") },
+    { href: "alerts", label: "Slack & webhooks", icon: BellRing, show: can("org:update") },
     { href: "api-keys", label: "Developer API", icon: KeyRound, show: can("org:update") },
     { href: "billing", label: "Plan & billing", icon: CreditCard, show: can("billing:manage") },
     { href: "ai", label: "AI tokens", icon: Sparkles, show: !client },

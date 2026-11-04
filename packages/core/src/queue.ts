@@ -66,6 +66,7 @@ export const AUTOMATION_QUEUE = "automation";
 export type AutomationJob =
   | { name: "rules-tick" }
   | { name: "reports-tick" }
+  | { name: "anomaly-tick" }
   | { name: "rule"; ruleId: string }
   | { name: "report"; reportId: string };
 

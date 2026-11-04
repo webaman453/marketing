@@ -26,6 +26,7 @@ import { builderRouter } from "./builder.routes";
 import { creativesRouter } from "./creatives.routes";
 import { leadsRouter } from "./leads.routes";
 import { reportsRouter } from "./reports.routes";
+import { alertsRouter } from "./alerts.routes";
 import { rulesRouter } from "./rules.routes";
 import { spendRouter } from "./spend.routes";
 import { toAuditDTO } from "../lib/serialize";
@@ -46,7 +47,7 @@ import {
 
 export const workspacesRouter = Router({ mergeParams: true });
 workspacesRouter.use(loadWorkspace, requireActivePlanForWrites);
-workspacesRouter.use(creativesRouter, adMediaRouter, leadsRouter, builderRouter, reportsRouter, rulesRouter, aiRouter, spendRouter);
+workspacesRouter.use(creativesRouter, adMediaRouter, leadsRouter, builderRouter, reportsRouter, rulesRouter, alertsRouter, aiRouter, spendRouter);
 
 const campaignInclude = { adAccount: { select: { id: true, name: true, currency: true } } } as const;
 

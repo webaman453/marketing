@@ -9,6 +9,8 @@ import { config } from "./config";
 import { logger } from "./lib/logger";
 import { requireAuth, requireSuperAdmin } from "./middleware/auth";
 import { adminRouter } from "./modules/admin.routes";
+import { alertActionsRouter } from "./modules/alerts.routes";
+import { slackCallbackRouter } from "./modules/org-extras.routes";
 import { billingWebhookRouter } from "./modules/billing.routes";
 import { filesRouter } from "./modules/files.routes";
 import { notificationsRouter } from "./modules/notifications.routes";
@@ -52,11 +54,14 @@ export function createApp() {
 
   app.use("/api/catalog", catalogRouter);
   app.use("/api/auth", authRouter);
+  // Slack is not an ad platform, so its callback must come before the generic /api/oauth/:platform/callback.
+  app.use("/api/oauth/slack", slackCallbackRouter);
   app.use("/api/oauth", oauthRouter);
   app.use("/api/files", filesRouter);
   app.use("/api/public/reports", publicReportsRouter);
   app.use("/api/v1", publicApiRouter);
   app.use("/api/notifications", requireAuth, notificationsRouter);
+  app.use("/api/alert-actions", requireAuth, alertActionsRouter);
   app.use("/api/admin", requireAuth, requireSuperAdmin, adminRouter);
   app.use("/api/orgs", requireAuth, orgsRouter);
   app.use("/api/workspaces/:workspaceId", requireAuth, workspacesRouter);

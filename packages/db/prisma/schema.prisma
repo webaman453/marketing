@@ -147,7 +147,7 @@ model User {
   sessions            Session[]
   passwordResetTokens PasswordResetToken[]
   emailVerifications  EmailVerificationToken[]
-  invitationsSent     Invitation[]         @relation("InvitedBy")
+  invitationsSent     Invitation[]             @relation("InvitedBy")
   connectionsCreated  PlatformConnection[]
   auditLogs           AuditLog[]
   notificationPrefs   NotificationPreference?
@@ -243,6 +243,7 @@ model Organization {
   rules         Rule[]
   notifications Notification[]
   apiKeys       ApiKey[]
+  alertWebhooks AlertWebhook[]
   aiLedger      AiTokenLedger[]
   aiOrders      AiTokenOrder[]
   spendBudgets  SpendBudget[]
@@ -301,15 +302,19 @@ model Invitation {
 
 /// A brand or client. Agencies create one workspace per client.
 model Workspace {
-  id         String    @id @default(cuid())
-  orgId      String
-  name       String
-  slug       String
-  currency   String    @default("INR")
-  timezone   String    @default("Asia/Kolkata")
-  archivedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  orgId             String
+  name              String
+  slug              String
+  currency          String    @default("INR")
+  timezone          String    @default("Asia/Kolkata")
+  archivedAt        DateTime?
+  /// Unusual-spend alerts (see anomalies.ts): on/off, how many times the recent daily average counts as a spike, and days of spend without conversions.
+  anomalyEnabled    Boolean   @default(true)
+  anomalySpikeRatio Float     @default(2)
+  anomalyDeadDays   Int       @default(3)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   org        Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   members    MembershipWorkspace[]
@@ -358,7 +363,7 @@ model PlatformConnection {
   adAccounts AdAccount[]
   syncRuns   SyncRun[]
 
-  leads      Lead[]
+  leads Lead[]
 
   @@unique([orgId, platform, externalUserId])
   @@index([status])
@@ -382,33 +387,33 @@ model SyncRun {
 }
 
 model AdAccount {
-  id           String    @id @default(cuid())
-  orgId        String
-  connectionId String
-  workspaceId  String?
-  platform     Platform
-  externalId   String
-  name         String
-  currency     String
-  timezone     String?
+  id               String    @id @default(cuid())
+  orgId            String
+  connectionId     String
+  workspaceId      String?
+  platform         Platform
+  externalId       String
+  name             String
+  currency         String
+  timezone         String?
   /// Raw platform account status, e.g. ACTIVE / DISABLED / UNSETTLED
-  status       String
-  lastSyncedAt DateTime?
-  meta         Json?
+  status           String
+  lastSyncedAt     DateTime?
+  meta             Json?
   /// Billing as the platform last reported it (PlatformBillingDTO), for platforms that expose it
-  billing      Json?
+  billing          Json?
   billingFetchedAt DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  org        Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  connection PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  workspace  Workspace?         @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  org         Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connection  PlatformConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  workspace   Workspace?         @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   spendBudget SpendBudget?
-  campaigns  Campaign[]
-  adGroups   AdGroup[]
-  ads        Ad[]
-  metrics    MetricDaily[]
+  campaigns   Campaign[]
+  adGroups    AdGroup[]
+  ads         Ad[]
+  metrics     MetricDaily[]
 
   @@unique([orgId, platform, externalId])
   @@index([workspaceId])
@@ -437,9 +442,10 @@ model Campaign {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  adAccount AdAccount @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
-  adGroups  AdGroup[]
-  ads       Ad[]
+  adAccount     AdAccount      @relation(fields: [adAccountId], references: [id], onDelete: Cascade)
+  adGroups      AdGroup[]
+  ads           Ad[]
+  anomalySnooze AnomalySnooze?
 
   @@unique([adAccountId, externalId])
   @@index([adAccountId, status])
@@ -539,38 +545,38 @@ enum LeadStatus {
 }
 
 model Lead {
-  id           String   @id @default(cuid())
-  orgId        String
-  workspaceId  String
-  connectionId String
-  platform     Platform
+  id                String     @id @default(cuid())
+  orgId             String
+  workspaceId       String
+  connectionId      String
+  platform          Platform
   /// The platform's own lead id
-  externalId   String
+  externalId        String
   /// Where it came from on the platform, e.g. "fb" or "ig"
-  source       String?
-  isOrganic    Boolean  @default(false)
-  formId       String?
-  formName     String?
-  pageId       String?
-  campaignId   String?
-  adGroupId    String?
-  adId         String?
-  externalAdId String?
-  campaignName String?
-  adGroupName  String?
-  adName       String?
-  name         String?
-  email        String?
-  phone        String?
+  source            String?
+  isOrganic         Boolean    @default(false)
+  formId            String?
+  formName          String?
+  pageId            String?
+  campaignId        String?
+  adGroupId         String?
+  adId              String?
+  externalAdId      String?
+  campaignName      String?
+  adGroupName       String?
+  adName            String?
+  name              String?
+  email             String?
+  phone             String?
   /// Every answer on the form: question key → values
-  fields       Json
+  fields            Json
   /// When the person submitted the form (platform time)
-  createdTime  DateTime
-  createdAt    DateTime @default(now())
+  createdTime       DateTime
+  createdAt         DateTime   @default(now())
   /// Follow-up workflow, set by the team in the app. Sync never writes these.
-  status          LeadStatus @default(NEW)
+  status            LeadStatus @default(NEW)
   /// The team's note on the lead (up to 2,000 characters)
-  note            String?
+  note              String?
   /// Last time the status or note changed, and who changed it (a user id; kept when that user is deleted)
   statusUpdatedAt   DateTime?
   statusUpdatedById String?
@@ -708,28 +714,31 @@ model ReportRun {
 
 /// If/then automation. `scope`, `conditions` and `actions` follow the Rule* types in @ashniva/shared.
 model Rule {
-  id             String        @id @default(cuid())
-  orgId          String
-  workspaceId    String
-  name           String
-  isActive       Boolean       @default(true)
-  scope          Json
-  conditionLogic String        @default("ALL")
-  conditions     Json
-  actions        Json
-  lookbackDays   Int           @default(3)
-  frequency      RuleFrequency @default(DAILY)
-  cooldownHours  Int           @default(24)
-  lastRunAt      DateTime?
-  nextRunAt      DateTime?
-  createdById    String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  orgId           String
+  workspaceId     String
+  name            String
+  isActive        Boolean       @default(true)
+  scope           Json
+  conditionLogic  String        @default("ALL")
+  conditions      Json
+  actions         Json
+  lookbackDays    Int           @default(3)
+  frequency       RuleFrequency @default(DAILY)
+  cooldownHours   Int           @default(24)
+  /// When true, matches become suggestions a person approves instead of being applied.
+  requireApproval Boolean       @default(false)
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  createdById     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  runs      RuleRun[]
-  targets   RuleTarget[]
+  org         Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs        RuleRun[]
+  targets     RuleTarget[]
+  suggestions RuleSuggestion[]
 
   @@index([isActive, nextRunAt])
   @@index([workspaceId])
@@ -788,13 +797,14 @@ model Notification {
 
 /// Which emails a user wants. In-app notifications are always created; a missing row means every email is on.
 model NotificationPreference {
-  userId       String   @id
-  ruleAlerts   Boolean  @default(true)
-  reportCopies Boolean  @default(true)
-  lowAiBalance Boolean  @default(true)
-  syncFailures Boolean  @default(true)
-  spendAlerts  Boolean  @default(true)
-  updatedAt    DateTime @updatedAt
+  userId        String   @id
+  ruleAlerts    Boolean  @default(true)
+  reportCopies  Boolean  @default(true)
+  lowAiBalance  Boolean  @default(true)
+  syncFailures  Boolean  @default(true)
+  spendAlerts   Boolean  @default(true)
+  anomalyAlerts Boolean  @default(true)
+  updatedAt     DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -935,4 +945,94 @@ model SpendBudget {
 
   @@index([orgId])
   @@map("spend_budgets")
+}
+
+// ───────────────────────── Alert delivery ─────────────────────────
+
+enum WebhookKind {
+  SLACK
+  WEBHOOK
+  WHATSAPP
+}
+
+/// Where an organization's alerts are also posted: a Slack incoming webhook, or any URL
+/// that receives a signed JSON POST. The URL (it is a secret for Slack) is stored encrypted.
+model AlertWebhook {
+  id           String      @id @default(cuid())
+  orgId        String
+  name         String
+  kind         WebhookKind
+  urlEnc       String
+  /// Host only, for the list in settings.
+  urlHint      String
+  /// HMAC-SHA256 signing secret for generic webhooks (encrypted).
+  secretEnc    String?
+  isActive     Boolean     @default(true)
+  /// Workspaces whose alerts go here. Empty = every workspace (and organization-wide alerts).
+  workspaceIds String[]    @default([])
+  /// Alert groups (see ALERT_GROUPS in @ashniva/shared) sent here. Empty = all of them.
+  events       String[]    @default([])
+  lastSentAt   DateTime?
+  lastStatus   Int?
+  lastError    String?
+  createdById  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("alert_webhooks")
+}
+
+// ───────────────────────── Approvals and mutes ─────────────────────────
+
+enum SuggestionStatus {
+  PENDING
+  APPLIED
+  DISMISSED
+  EXPIRED
+  FAILED
+}
+
+/// What a rule in "ask me first" mode wants to do to one campaign, until a person approves or dismisses it.
+model RuleSuggestion {
+  id           String           @id @default(cuid())
+  ruleId       String
+  orgId        String
+  workspaceId  String
+  /// Plain ids: a suggestion outlives a campaign that later vanishes from a sync.
+  campaignId   String
+  campaignName String
+  platform     Platform
+  /// The rule's non-notify actions, as in @ashniva/shared RuleAction.
+  actions      Json
+  /// The metric values that matched.
+  values       Json
+  status       SuggestionStatus @default(PENDING)
+  error        String?
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime         @default(now())
+
+  rule Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([ruleId, campaignId, status])
+  @@map("rule_suggestions")
+}
+
+/// A campaign whose unusual-spend alerts are muted until `until`.
+model AnomalySnooze {
+  id          String   @id @default(cuid())
+  campaignId  String   @unique
+  orgId       String
+  until       DateTime
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([until])
+  @@map("anomaly_snoozes")
 }

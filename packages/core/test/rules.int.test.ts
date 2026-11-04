@@ -5,6 +5,7 @@ import { prisma } from "../../../test/helpers/db";
 import { addMember, createOrg, createUser } from "../../../test/helpers/factories";
 import { encryptSecret } from "../src/crypto";
 import { todayIn } from "../src/reports";
+import { approveSuggestion, dismissSuggestion, SuggestionError } from "../src/rule-suggestions";
 import { evaluateRule } from "../src/rules";
 
 /** Faster than resetDb(): every tenant row cascades from organizations or users. */
@@ -281,5 +282,71 @@ describe("evaluateRule", () => {
     const r = await rule();
     await evaluateRule(r.id, { userId: ownerId });
     expect((await prisma.auditLog.findFirstOrThrow({ where: { action: "campaign.paused" } })).userId).toBe(ownerId);
+  });
+});
+
+describe("rules that ask first", () => {
+  async function costly() {
+    const c = await campaign("Costly");
+    await metrics(c, { spend: 1000, conversions: 2 }); // CPA 500
+    return c;
+  }
+  const askFirst = () => rule({ requireApproval: true, actions: [{ type: "PAUSE" }, { type: "NOTIFY" }] });
+
+  it("suggests the change, tells people, and touches nothing on the platform", async () => {
+    const c = await costly();
+    const r = await askFirst();
+    const run = await evaluateRule(r.id);
+
+    expect(details(run)[0]!.actions).toEqual([{ type: "PAUSE", ok: true, detail: "Waiting for approval" }, { type: "NOTIFY", ok: true }]);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: c.id } })).status).toBe("ACTIVE");
+    const [s] = await prisma.ruleSuggestion.findMany({ where: { ruleId: r.id } });
+    expect(s).toMatchObject({ status: "PENDING", campaignId: c.id, campaignName: "Costly", workspaceId, actions: [{ type: "PAUSE" }] });
+    const note = await prisma.notification.findFirstOrThrow({ where: { type: "rule.suggested" } });
+    expect(note).toMatchObject({ workspaceId, link: `/w/${workspaceId}/automations` });
+    expect(await prisma.notification.count({ where: { type: "rule.triggered" } })).toBe(0);
+  });
+
+  it("does not suggest the same campaign again while one is waiting", async () => {
+    await costly();
+    const r = await askFirst();
+    await evaluateRule(r.id);
+    await prisma.ruleTarget.deleteMany(); // past the cooldown
+    await evaluateRule(r.id);
+    expect(await prisma.ruleSuggestion.count({ where: { ruleId: r.id } })).toBe(1);
+  });
+
+  it("applies the change only when approved, audited as that person", async () => {
+    const c = await costly();
+    const r = await askFirst();
+    await evaluateRule(r.id);
+    const s = await prisma.ruleSuggestion.findFirstOrThrow({ where: { ruleId: r.id } });
+
+    await approveSuggestion(workspaceId, s.id, ownerId);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: c.id } })).status).toBe("PAUSED");
+    expect(await prisma.ruleSuggestion.findUniqueOrThrow({ where: { id: s.id } })).toMatchObject({ status: "APPLIED", resolvedById: ownerId });
+    expect(await prisma.auditLog.findFirstOrThrow({ where: { action: "campaign.paused" } })).toMatchObject({ userId: ownerId });
+    // A second approval is refused rather than repeated.
+    await expect(approveSuggestion(workspaceId, s.id, ownerId)).rejects.toBeInstanceOf(SuggestionError);
+  });
+
+  it("leaves the campaign alone when dismissed, and won't take a suggestion from another workspace", async () => {
+    const c = await costly();
+    const r = await askFirst();
+    await evaluateRule(r.id);
+    const s = await prisma.ruleSuggestion.findFirstOrThrow({ where: { ruleId: r.id } });
+
+    await expect(approveSuggestion("some-other-workspace", s.id, ownerId)).rejects.toBeInstanceOf(SuggestionError);
+    await dismissSuggestion(workspaceId, s.id, ownerId);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: c.id } })).status).toBe("ACTIVE");
+    expect(await prisma.ruleSuggestion.findUniqueOrThrow({ where: { id: s.id } })).toMatchObject({ status: "DISMISSED" });
+  });
+
+  it("still notifies as before when a rule only notifies, even in ask-first mode", async () => {
+    await costly();
+    const r = await rule({ requireApproval: true, actions: [{ type: "NOTIFY" }] });
+    await evaluateRule(r.id);
+    expect(await prisma.ruleSuggestion.count()).toBe(0);
+    expect(await prisma.notification.count({ where: { type: "rule.triggered" } })).toBe(1);
   });
 });

@@ -343,5 +343,6 @@ export async function ruleFromText(caller: AiCaller, text: string, currency: str
     lookbackDays: Math.min(30, Math.max(1, res.lookbackDays)),
     frequency: res.frequency,
     cooldownHours: 24,
+    requireApproval: false,
   };
 }

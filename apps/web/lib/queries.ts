@@ -21,6 +21,9 @@ import type {
   UpdateLeadInput,
 } from "@ashniva/shared";
 import type {
+  AlertWebhookDTO,
+  AnomalySettingsDTO,
+  RuleSuggestionDTO,
   AiInsightsResponse,
   AiStatusDTO,
   AiWalletDTO,
@@ -239,6 +242,10 @@ export const qk2 = {
   notifications: ["notifications"] as const,
   billing: (org: string) => ["billing", org] as const,
   apiKeys: (org: string) => ["api-keys", org] as const,
+  alertWebhooks: (org: string) => ["alert-webhooks", org] as const,
+  ruleSuggestions: (ws: string) => ["rule-suggestions", ws] as const,
+  anomalySettings: (ws: string) => ["anomaly-settings", ws] as const,
+  anomalySnooze: (ws: string, id: string) => ["anomaly-snooze", ws, id] as const,
   aiStatus: (ws: string) => ["ai-status", ws] as const,
   aiWallet: (org: string) => ["ai-wallet", org] as const,
 };
@@ -303,6 +310,12 @@ export interface BillingInfo {
 export const useBilling = (org: string) =>
   useQuery({ queryKey: qk2.billing(org), queryFn: () => api<BillingInfo>(`/orgs/${org}/billing`) });
 
+export const useRuleSuggestions = (ws: string, enabled = true) =>
+  useQuery({ queryKey: qk2.ruleSuggestions(ws), queryFn: () => api<RuleSuggestionDTO[]>(`/workspaces/${ws}/rule-suggestions`), enabled });
+export const useAnomalySettings = (ws: string) =>
+  useQuery({ queryKey: qk2.anomalySettings(ws), queryFn: () => api<AnomalySettingsDTO>(`/workspaces/${ws}/anomaly-settings`) });
+export const useAlertWebhooks = (org: string, enabled = true) =>
+  useQuery({ queryKey: qk2.alertWebhooks(org), queryFn: () => api<AlertWebhookDTO[]>(`/orgs/${org}/alert-webhooks`), enabled });
 export const useApiKeys = (org: string, enabled = true) =>
   useQuery({ queryKey: qk2.apiKeys(org), queryFn: () => api<ApiKeyDTO[]>(`/orgs/${org}/api-keys`), enabled });
 

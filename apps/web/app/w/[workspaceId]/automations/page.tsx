@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { EmptyState, ErrorState } from "@/components/app/states";
 import { useWorkspace } from "@/components/app/workspace-context";
 import { describeAction, describeConditions } from "@/components/automations/rule-text";
+import { SuggestionsPanel } from "@/components/automations/suggestions-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,6 +20,7 @@ import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { toastError } from "@/lib/forms";
 import { qk2, useRules } from "@/lib/queries";
+import { cn } from "@/lib/utils";
 
 export default function AutomationsPage() {
   const { workspace, can } = useWorkspace();
@@ -47,6 +49,8 @@ export default function AutomationsPage() {
         actions={canEdit && <Button asChild><Link href={`/w/${workspace.id}/automations/new`}><Plus /> New rule</Link></Button>}
       />
 
+      <SuggestionsPanel />
+
       {rules.isError ? (
         <Card><ErrorState message={rules.error.message} onRetry={() => rules.refetch()} /></Card>
       ) : !rules.data ? (
@@ -61,10 +65,15 @@ export default function AutomationsPage() {
           />
           <div className="grid gap-3 border-t p-5 md:grid-cols-3">
             {RULE_TEMPLATES.map((t) => (
-              <div key={t.name} className="rounded-lg border p-4">
+              <Link
+                key={t.name}
+                href={`/w/${workspace.id}/automations/new?template=${encodeURIComponent(t.name)}`}
+                className={cn("rounded-lg border p-4 transition-colors hover:border-primary/40 hover:bg-primary/5", !canEdit && "pointer-events-none opacity-60")}
+              >
                 <p className="text-sm font-medium">{t.name}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{t.description}</p>
-              </div>
+                <p className="mt-2 text-xs font-medium text-primary">Use this rule</p>
+              </Link>
             ))}
           </div>
         </Card>
@@ -85,6 +94,7 @@ export default function AutomationsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold">{r.name}</h3>
                     <Badge variant="secondary" className="text-[10px]">{r.frequency === "HOURLY" ? "Hourly" : "Daily"}</Badge>
+                    {r.requireApproval && <Badge variant="outline" className="text-[10px]">Asks first</Badge>}
                   </div>
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     If {describeConditions(r.conditions, r.conditionLogic, workspace.currency)} ({r.lookbackDays}d) → {r.actions.map((a) => describeAction(a, workspace.currency).toLowerCase()).join(", ")}

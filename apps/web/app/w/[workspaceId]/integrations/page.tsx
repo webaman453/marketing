@@ -56,6 +56,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ApiError, api } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import { toastError } from "@/lib/forms";
+import { friendlySyncError } from "@/lib/sync-errors";
 import { qk, useAdAccounts, useConnections, usePlatforms, type PlatformCatalogItem } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -522,6 +523,7 @@ function ConnectionsSection() {
   const { org, workspace, can, me } = useWorkspace();
   const queryClient = useQueryClient();
   const connections = useConnections(org.id);
+  const platforms = usePlatforms(org.id);
   const [removing, setRemoving] = useState<ConnectionDTO | null>(null);
   const [busy, setBusy] = useState(false);
   const canManage = can("integrations:manage");
@@ -542,6 +544,22 @@ function ConnectionsSection() {
       );
       toast.success("Sync started", { description: "Fresh data will appear in a minute." });
       void queryClient.invalidateQueries({ queryKey: qk.connections(org.id) });
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
+  /** Signs in again for a login whose access lapsed. Platforms that use the customer's own keys re-enter them on the platform card. */
+  async function reconnect(c: ConnectionDTO) {
+    const item = platforms.data?.find((p) => p.id === c.platform);
+    if (item?.connectsWithCredentials || c.platform === "SHOPIFY") {
+      toast.info(`Enter the ${PLATFORM_INFO[c.platform].name} keys again`, { description: "Use the platform's card above to connect with fresh keys." });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    try {
+      const { url } = await api<{ url: string }>(`/orgs/${org.id}/connections/${c.platform.toLowerCase()}/authorize`, { method: "POST", body: { workspaceId: workspace.id } });
+      window.location.assign(url);
     } catch (err) {
       toastError(err);
     }
@@ -620,7 +638,7 @@ function ConnectionsSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3 sm:justify-end">
-                  <SyncBadge connection={c} />
+                  <SyncBadge connection={c} onReconnect={canManage ? () => void reconnect(c) : undefined} />
                   {canManage && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -681,12 +699,30 @@ function ConnectionsSection() {
   );
 }
 
-function SyncBadge({ connection: c }: { connection: ConnectionDTO }) {
-  if (c.status === "EXPIRED") {
+function SyncBadge({ connection: c, onReconnect }: { connection: ConnectionDTO; onReconnect?: () => void }) {
+  if (c.status === "EXPIRED" || c.syncStatus === "FAILED") {
+    const why = friendlySyncError(c.lastSyncError, c.status);
+    const expired = c.status === "EXPIRED";
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive">
-        <XCircle className="size-3.5" /> Access expired · reconnect
-      </span>
+      <div className="flex items-center gap-2.5">
+        <div className="max-w-64 text-right">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex cursor-help items-center gap-1.5 text-xs font-medium text-destructive">
+                {expired ? <XCircle className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
+                {expired ? "Access expired" : "Sync failed"}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-72">{c.lastSyncError ?? "Unknown error"}</TooltipContent>
+          </Tooltip>
+          <p className="text-xs leading-snug text-muted-foreground">{why.message}</p>
+        </div>
+        {why.reconnect && onReconnect && (
+          <Button size="sm" variant="outline" onClick={onReconnect}>
+            <Plug /> Reconnect
+          </Button>
+        )}
+      </div>
     );
   }
   if (c.syncStatus === "QUEUED" || c.syncStatus === "RUNNING") {
@@ -694,18 +730,6 @@ function SyncBadge({ connection: c }: { connection: ConnectionDTO }) {
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-primary">
         <Loader2 className="size-3.5 animate-spin" /> {c.syncStatus === "QUEUED" ? "Queued" : "Syncing…"}
       </span>
-    );
-  }
-  if (c.syncStatus === "FAILED") {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex cursor-help items-center gap-1.5 text-xs font-medium text-destructive">
-            <AlertTriangle className="size-3.5" /> Sync failed
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-72">{c.lastSyncError ?? "Unknown error"}</TooltipContent>
-      </Tooltip>
     );
   }
   return (

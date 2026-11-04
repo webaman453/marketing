@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MuteAlertsButton } from "@/components/campaigns/mute-alerts-button";
 import { dateTime, humanize, initials, longDate, money, multiple, number, percent, timeAgo } from "@/lib/format";
 import { useCampaign } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -123,6 +124,7 @@ export default function CampaignDetailPage() {
               <Pencil /> Budget: {budgetLabel}
             </Button>
           )}
+          <MuteAlertsButton campaignId={c.id} />
           <DateRangePicker />
         </div>
       </div>

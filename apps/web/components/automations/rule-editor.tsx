@@ -10,6 +10,8 @@ import {
   RULE_METRICS,
   RULE_OPERATORS,
   RULE_TEMPLATES,
+  scaleRuleForCurrency,
+  templateNeedsScaling,
   type Platform,
   type RuleAction,
   type RuleCondition,
@@ -21,7 +23,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bot, CheckCircle2, ChevronDown, Loader2, Play, Plus, Save, Search, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/app/workspace-context";
 import { FormField } from "@/components/form-field";
@@ -62,6 +64,7 @@ const blank = (): RuleInput => ({
   lookbackDays: 3,
   frequency: "DAILY",
   cooldownHours: 24,
+  requireApproval: false,
 });
 
 /** The editable part of a saved rule, in the same shape as the form. */
@@ -75,6 +78,7 @@ const toInput = (r: RuleDTO): RuleInput => ({
   lookbackDays: r.lookbackDays,
   frequency: r.frequency,
   cooldownHours: r.cooldownHours,
+  requireApproval: r.requireApproval,
 });
 
 const unitHint = (metric: string, currency: string) =>
@@ -102,6 +106,17 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
   const platforms = useMemo(() => [...new Set((accounts.data ?? []).map((a) => a.platform))].filter(isPlatformShown), [accounts.data]);
   const currency = workspace.currency;
   const set = (patch: Partial<RuleInput>) => setForm((f) => ({ ...f, ...patch }));
+  /** Template amounts are examples in INR, so they are sized for this workspace's currency first. */
+  const applyTemplate = (t: (typeof RULE_TEMPLATES)[number]) => setForm({ ...scaleRuleForCurrency(t.rule, currency), name: t.name, isActive: true, requireApproval: form.requireApproval });
+  // A template picked on the Automations page arrives as ?template=<name>.
+  useEffect(() => {
+    if (rule) return;
+    const wanted = new URLSearchParams(window.location.search).get("template");
+    const t = wanted ? RULE_TEMPLATES.find((x) => x.name === wanted) : undefined;
+    if (t) applyTemplate(t);
+    // Only once, when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const setCondition = (i: number, patch: Partial<RuleCondition>) =>
     set({ conditions: form.conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   const setAction = (i: number, patch: Partial<RuleAction>) =>
@@ -204,12 +219,15 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
               key={t.name}
               type="button"
               title={t.description}
-              onClick={() => setForm({ ...t.rule, name: t.name, isActive: true })}
+              onClick={() => applyTemplate(t)}
               className="rounded-full border bg-card px-3 py-1 text-xs transition-colors hover:border-primary/40 hover:bg-primary/5"
             >
               {t.name}
             </button>
           ))}
+          {templateNeedsScaling(currency) && (
+            <span className="basis-full text-xs text-muted-foreground">Amounts in templates are rough examples in {currency}. Set them to your own targets before saving.</span>
+          )}
         </div>
       )}
 
@@ -386,6 +404,17 @@ export function RuleEditor({ rule }: { rule: RuleDTO | null }) {
                   </Select>
                 </FormField>
               </div>
+              {form.actions.some((a) => a.type !== "NOTIFY") && (
+                <label htmlFor="require-approval" className="flex cursor-pointer items-start justify-between gap-6 rounded-lg border p-3.5">
+                  <span>
+                    <span className="block text-sm font-medium">Ask me before applying</span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                      The rule only suggests the change. You approve or dismiss it in Automations, and nothing is touched on the platform until you approve.
+                    </span>
+                  </span>
+                  <Switch id="require-approval" checked={form.requireApproval} onCheckedChange={(on) => set({ requireApproval: on })} disabled={!canEdit} />
+                </label>
+              )}
             </CardContent>
           </Card>
 

@@ -43,12 +43,13 @@ export type CredentialGroupId =
   | "SHOPIFY"
   | "AI"
   | "RAZORPAY"
-  | "EMAIL";
+  | "EMAIL"
+  | "SLACK";
 
 export interface CredentialGroup {
   id: CredentialGroupId;
   title: string;
-  kind: "platform" | "ai" | "billing" | "email";
+  kind: "platform" | "ai" | "billing" | "email" | "alerts";
   platform?: Platform;
   /** What it unlocks, in one line. */
   purpose: string;
@@ -479,6 +480,26 @@ export const CREDENTIAL_GROUPS: CredentialGroup[] = [
       { key: "EMAIL_FROM", label: "From address", optional: true, placeholder: "Ashniva Ads <no-reply@yourdomain.com>" },
     ],
   },
+  {
+    id: "SLACK",
+    title: "Slack (Add to Slack button)",
+    kind: "alerts",
+    purpose: "Lets customers send their alerts to Slack with one click, instead of pasting a webhook URL.",
+    consoleUrl: "https://api.slack.com/apps",
+    consoleLabel: "Slack API",
+    steps: [
+      "Open api.slack.com/apps and choose Create New App, then From scratch (or Pick features). Name it, for example, “Ashniva Alerts”, and pick any workspace you own.",
+      "In the left menu open OAuth & Permissions. Under Redirect URLs choose Add New Redirect URL, paste the redirect URL below and save it.",
+      "Still on that page, under Scopes → Bot Token Scopes, add the scope incoming-webhook.",
+      "In the left menu open Basic Information. Copy the Client ID and Client Secret from App Credentials and paste them here.",
+      "In the left menu open Manage Distribution and turn on Activate Public Distribution (Slack asks you to confirm a few checklist items first). Until then only your own workspace can use the button.",
+    ],
+    needsRedirectUrl: true,
+    fields: [
+      { key: "SLACK_CLIENT_ID", label: "Client ID", placeholder: "1234567890.1234567890" },
+      { key: "SLACK_CLIENT_SECRET", label: "Client Secret", secret: true },
+    ],
+  },
 ];
 
 export const MANAGED_ENV_KEYS = CREDENTIAL_GROUPS.flatMap((g) => g.fields.map((f) => f.key));
@@ -528,6 +549,8 @@ export interface CredentialGroupStatus {
 
 export interface CredentialsDTO {
   redirectUrls: Partial<Record<Platform, string>>;
+  /** Where Slack sends people back after "Add to Slack". */
+  slackRedirectUrl: string;
   webhookUrl: string;
   groups: CredentialGroupStatus[];
 }

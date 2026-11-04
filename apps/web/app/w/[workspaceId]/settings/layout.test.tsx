@@ -15,8 +15,8 @@ beforeEach(() => navigation.reset({ pathname: "/w/ws_1/settings/team" }));
 
 describe("Settings layout navigation", () => {
   it.each<[Role, string[]]>([
-    ["OWNER", ["General", "Workspaces", "Team", "Branding", "Developer API", "Plan & billing", "AI tokens", "Your profile", "Notifications"]],
-    ["ADMIN", ["General", "Workspaces", "Team", "Branding", "Developer API", "AI tokens", "Your profile", "Notifications"]],
+    ["OWNER", ["General", "Workspaces", "Team", "Branding", "Slack & webhooks", "Developer API", "Plan & billing", "AI tokens", "Your profile", "Notifications"]],
+    ["ADMIN", ["General", "Workspaces", "Team", "Branding", "Slack & webhooks", "Developer API", "AI tokens", "Your profile", "Notifications"]],
     ["MANAGER", ["General", "Workspaces", "Team", "AI tokens", "Your profile", "Notifications"]],
     ["ANALYST", ["General", "Workspaces", "Team", "AI tokens", "Your profile", "Notifications"]],
     ["CLIENT", ["General", "Workspaces", "Your profile", "Notifications"]],

@@ -1,6 +1,7 @@
 import { prisma, type Role } from "@ashniva/db";
 import type { NotificationPrefKey } from "@ashniva/shared";
 import { esc, sendMail } from "./mailer";
+import { deliverToWebhooks } from "./webhooks";
 
 /** Of these users, the ones who have turned the given email off. */
 export async function emailOptOuts(userIds: string[], pref: NotificationPrefKey) {
@@ -20,6 +21,8 @@ export interface NotificationInput {
   body?: string;
   /** App-relative path, e.g. /w/<id>/campaigns/<id> */
   link?: string;
+  /** One-click links (absolute URLs) added to Slack and webhook alerts. */
+  actions?: { label: string; url: string }[];
   /** Label of the email's button to `link`. */
   ctaLabel?: string;
   /** Recipients: explicit users, or everyone in the org with one of these roles. */
@@ -42,6 +45,8 @@ export async function notify(input: NotificationInput) {
     },
     include: { user: { select: { id: true, email: true } } },
   });
+  // The organization's Slack and webhook channels get the alert too (they are not tied to one member).
+  await deliverToWebhooks({ orgId: input.orgId, workspaceId: input.workspaceId, type: input.type, title: input.title, body: input.body?.slice(0, 2000), link: input.link, actions: input.actions });
   if (members.length === 0) return 0;
 
   await prisma.notification.createMany({

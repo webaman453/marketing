@@ -27,7 +27,11 @@ describe("BuilderStart", () => {
     const { user, onStart } = setup([makeWsAccount()]);
     const meta = await screen.findByRole("button", { name: /Meta Ads/ });
     expect(meta).toHaveTextContent("1 ad account");
-    expect(screen.getByRole("button", { name: /Google Ads/ })).toBeDisabled();
+    // Platforms without an ad account here are folded away and lead to connecting them.
+    expect(screen.queryByRole("button", { name: /Google Ads/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Google Ads/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Connect another platform/ }));
+    expect(screen.getByRole("link", { name: /Google Ads/ })).toHaveAttribute("href", "/w/ws_1/integrations");
     expect(screen.getByText("Choose a platform to begin")).toBeInTheDocument();
     expect(continueButton()).toBeDisabled();
 
@@ -77,7 +81,9 @@ describe("BuilderStart", () => {
     expect(await screen.findByText("The “Main workspace” workspace has no ad accounts yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Switch to Clients (2 accounts)" })).toHaveAttribute("href", "/w/ws_2/campaigns/new");
     expect(screen.getByRole("link", { name: /Add or assign ad accounts/ })).toHaveAttribute("href", "/w/ws_1/integrations");
-    expect(screen.getByRole("button", { name: /Meta Ads/ })).toBeDisabled();
+    // Nothing is connected, so the platforms are all shown, as links to connect them.
+    expect(screen.getByRole("link", { name: /Meta Ads/ })).toHaveAttribute("href", "/w/ws_1/integrations");
+    expect(screen.queryByRole("button", { name: /Meta Ads/ })).not.toBeInTheDocument();
   });
 
   it("locked org: shows the plan banner and keeps Continue disabled even when complete", async () => {

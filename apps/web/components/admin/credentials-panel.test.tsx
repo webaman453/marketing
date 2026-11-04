@@ -33,6 +33,7 @@ const STATUS: CredentialGroupStatus[] = [
 
 const CREDS: CredentialsDTO = {
   redirectUrls: { META: "http://localhost:3100/api/oauth/meta/callback", GOOGLE: "https://ads.example.com/api/oauth/google/callback" },
+  slackRedirectUrl: "https://ads.example.com/api/oauth/slack/callback",
   webhookUrl: "https://ads.example.com/api/webhooks/razorpay",
   groups: STATUS,
 };

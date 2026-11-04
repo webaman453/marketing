@@ -13,6 +13,7 @@ import {
 } from "@ashniva/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BellRing,
   Bot,
   Check,
   CheckCircle2,
@@ -78,7 +79,7 @@ const SECTIONS: {
   {
     title: "AI, payments and email",
     description: "Shared services every organization uses.",
-    kinds: ["ai", "billing", "email"],
+    kinds: ["ai", "billing", "email", "alerts"],
   },
 ];
 
@@ -171,7 +172,7 @@ function GroupIcon({
   if (group.platform)
     return <PlatformIcon platform={group.platform} size="md" />;
   const Icon =
-    group.kind === "ai" ? Bot : group.kind === "billing" ? CreditCard : Mail;
+    group.kind === "ai" ? Bot : group.kind === "billing" ? CreditCard : group.kind === "alerts" ? BellRing : Mail;
   return (
     <span
       className={cn(
@@ -512,7 +513,9 @@ function CredentialForm({
     }
   }
 
-  const redirectUrl = group.platform
+  const redirectUrl = group.id === "SLACK"
+    ? creds.data?.slackRedirectUrl
+    : group.platform
     ? creds.data?.redirectUrls[group.platform]
     : undefined;
 

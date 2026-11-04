@@ -264,7 +264,7 @@ describe("platform billing", () => {
     const { owner } = await setup();
     const api = await as(owner);
     expect((await api.get("/api/notifications/preferences")).body.spendAlerts).toBe(true);
-    const body = { ruleAlerts: true, reportCopies: true, lowAiBalance: true, syncFailures: true, spendAlerts: false };
+    const body = { ruleAlerts: true, reportCopies: true, lowAiBalance: true, syncFailures: true, spendAlerts: false, anomalyAlerts: true };
     expect((await api.put("/api/notifications/preferences").send(body)).body.spendAlerts).toBe(false);
   });
 });

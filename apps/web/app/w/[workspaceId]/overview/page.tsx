@@ -13,6 +13,7 @@ import { GetStarted } from "@/components/dashboard/get-started";
 import { KpiCard, KpiCardSkeleton } from "@/components/dashboard/kpi-card";
 import { PerformanceChart } from "@/components/dashboard/performance-chart";
 import { PlatformBreakdown } from "@/components/dashboard/platform-breakdown";
+import { SetupChecklist } from "@/components/dashboard/setup-checklist";
 import { TopCampaigns } from "@/components/dashboard/top-campaigns";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -60,6 +61,7 @@ export default function OverviewPage() {
         <GetStarted />
       ) : (
         <div className={cn("space-y-6 transition-opacity", overview.isPlaceholderData && "opacity-60")}>
+          <SetupChecklist hasCampaigns={data.topCampaigns.length > 0 || data.totals.spend > 0} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {KPIS.map((k, i) => (
               <KpiCard

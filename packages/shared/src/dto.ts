@@ -335,10 +335,47 @@ export interface RuleDTO {
   lookbackDays: number;
   frequency: "HOURLY" | "DAILY";
   cooldownHours: number;
+  /** Matches wait for a person to approve them instead of being applied. */
+  requireApproval: boolean;
   lastRunAt: string | null;
   nextRunAt: string | null;
   lastRun: RuleRunDTO | null;
   updatedAt: string;
+}
+
+export interface RuleSuggestionDTO {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  campaignId: string;
+  campaignName: string;
+  platform: Platform;
+  actions: RuleAction[];
+  /** The metric values that matched, as in a rule run. */
+  values: Record<string, number | null>;
+  createdAt: string;
+}
+
+export interface AnomalySettingsDTO {
+  enabled: boolean;
+  /** A day's spend this many times the recent daily average counts as a spike. */
+  spikeRatio: number;
+  /** Days in a row of spend without conversions. */
+  deadDays: number;
+}
+
+/** What a one-click alert link would do, for the confirmation page. */
+export interface AlertActionInfoDTO {
+  action: "pause" | "snooze";
+  campaignName: string;
+  platform: Platform;
+  workspaceId: string;
+  workspaceName: string;
+  /** Days, for a snooze. */
+  days: number | null;
+  /** False when the campaign is already paused or the link can't be used. */
+  available: boolean;
+  note: string | null;
 }
 
 export interface RuleRunDetail {
@@ -368,6 +405,25 @@ export interface NotificationDTO {
   body: string | null;
   link: string | null;
   readAt: string | null;
+  createdAt: string;
+}
+
+export interface AlertWebhookDTO {
+  id: string;
+  name: string;
+  kind: "SLACK" | "WEBHOOK" | "WHATSAPP";
+  /** Host only; the full URL is never sent back. */
+  urlHint: string;
+  isActive: boolean;
+  /** Workspaces whose alerts are sent here; empty means every workspace. */
+  workspaceIds: string[];
+  /** Alert groups sent here; empty means all. */
+  events: string[];
+  /** Whether a signing secret exists (generic webhooks). The secret itself is shown once at creation. */
+  signed: boolean;
+  lastSentAt: string | null;
+  lastStatus: number | null;
+  lastError: string | null;
   createdAt: string;
 }
 

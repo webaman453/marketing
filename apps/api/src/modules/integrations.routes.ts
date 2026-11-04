@@ -396,7 +396,7 @@ interface OAuthState {
  * have expired by the time the platform redirects back. Fall back to the
  * refresh cookie instead of failing the connection.
  */
-async function authenticateRedirect(req: Request, res: Response): Promise<string | null> {
+export async function authenticateRedirect(req: Request, res: Response): Promise<string | null> {
   const token = req.cookies?.[ACCESS_COOKIE] as string | undefined;
   if (token) {
     try {

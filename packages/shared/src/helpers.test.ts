@@ -10,7 +10,7 @@ import { addDays, daysBetween, eachDay, parseISODate, previousPeriod, toISODate 
 import { LOWER_IS_BETTER, addTotals, deriveMetrics, emptyTotals, percentChange } from "./metrics";
 import { DEFAULT_NOTIFICATION_PREFS, NOTIFICATION_PREFS, notificationPrefsSchema } from "./notifications";
 import { reportScheduleSchema, reportSchema, resolveReportPreset } from "./reports";
-import { RULE_TEMPLATES, compare, ruleSchema } from "./rules";
+import { RULE_TEMPLATES, compare, ruleSchema, scaleRuleForCurrency, templateNeedsScaling } from "./rules";
 
 describe("metrics", () => {
   it("derives ratios and returns null on zero denominators", () => {
@@ -176,5 +176,32 @@ describe("geo, preview and drafts", () => {
     expect(draftSchema.parse({ payload: {} })).toEqual({ name: "Untitled campaign", payload: {} });
     expect(draftSchema.parse({ name: "  Sale ", payload: { a: 1 } }).name).toBe("Sale");
     expect(draftSchema.safeParse({ name: "x".repeat(401), payload: {} }).success).toBe(false);
+  });
+});
+
+describe("scaleRuleForCurrency", () => {
+  const cpc = RULE_TEMPLATES.find((t) => t.rule.conditions[0]?.metric === "cpc")!.rule;
+  const roas = RULE_TEMPLATES[0]!.rule;
+
+  it("leaves INR (and currencies without a rough rate) alone", () => {
+    expect(scaleRuleForCurrency(cpc, "INR")).toBe(cpc);
+    expect(scaleRuleForCurrency(cpc, "XYZ")).toBe(cpc);
+    expect(templateNeedsScaling("INR")).toBe(false);
+    expect(templateNeedsScaling("USD")).toBe(true);
+  });
+
+  it("sizes money amounts for the currency but not ratios", () => {
+    const usd = scaleRuleForCurrency(cpc, "USD");
+    expect(usd.conditions[0]!.value).toBe(0.6);
+    expect(usd.scope.minSpend).toBe(6);
+    const r = scaleRuleForCurrency(roas, "USD");
+    expect(r.conditions[0]!.value).toBe(1);
+    expect(r.scope.minSpend).toBe(12);
+  });
+
+  it("still passes validation after scaling, for every template and currency", () => {
+    for (const t of RULE_TEMPLATES) for (const cur of ["USD", "EUR", "JPY", "IDR"]) {
+      expect(ruleSchema.safeParse({ ...scaleRuleForCurrency(t.rule, cur), name: t.name }).success, `${t.name} ${cur}`).toBe(true);
+    }
   });
 });

@@ -47,7 +47,7 @@ notificationsRouter.post("/read", async (req, res) => {
 
 const toPrefsDTO = (p: NotificationPrefsDTO | null): NotificationPrefsDTO =>
   p
-    ? { ruleAlerts: p.ruleAlerts, reportCopies: p.reportCopies, lowAiBalance: p.lowAiBalance, syncFailures: p.syncFailures, spendAlerts: p.spendAlerts }
+    ? { ruleAlerts: p.ruleAlerts, reportCopies: p.reportCopies, lowAiBalance: p.lowAiBalance, syncFailures: p.syncFailures, spendAlerts: p.spendAlerts, anomalyAlerts: p.anomalyAlerts }
     : { ...DEFAULT_NOTIFICATION_PREFS };
 
 notificationsRouter.get("/preferences", async (req, res) => {

@@ -109,6 +109,8 @@ API versions in use: Meta Graph `v26.0`, Google Ads `v25`, LinkedIn `202609` (ol
 | Billing | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PLAN_*` | Plans page shows "Talk to sales"; set plans from `/admin` |
 | AI assistant | `AI_PROVIDER` (GEMINI · OPENAI · ANTHROPIC · OPENAI_COMPATIBLE), `AI_API_KEY`, optional `AI_MODEL`, `AI_BASE_URL` (compatible only), `AI_FREE_TOKENS` | AI buttons are hidden; token balances are kept |
 | Admin panel | `SUPER_ADMIN_EMAILS` | `/admin` is inaccessible |
+| Slack alerts (one-click Add to Slack) | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` (or Admin → API keys → Slack) | Customers paste a Slack webhook URL instead; the button is hidden |
+| Faster sync for running campaigns | `SYNC_ACTIVE_INTERVAL_MINUTES` (default 30, `0` = off) | Everything syncs every `SYNC_INTERVAL_MINUTES` |
 
 AI token packs (prices in `packages/shared/src/ai.ts`) use Razorpay one-time orders with the same keys; add `order.paid` / `payment.captured` to the webhook events.
 

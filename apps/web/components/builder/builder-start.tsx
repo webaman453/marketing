@@ -1,7 +1,7 @@
 "use client";
 
 import { BUILDER_SPECS, VISIBLE_PLATFORMS, PLATFORM_INFO, newDraft, setupOptions, type BuilderDraft, type Platform, type Values } from "@ashniva/shared";
-import { ArrowRight, CreditCard, Link2 } from "lucide-react";
+import { ArrowRight, ChevronDown, CreditCard, Link2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useWorkspace } from "@/components/app/workspace-context";
@@ -28,6 +28,7 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
   const [accountId, setAccountId] = useState<string | null>(null);
   const [setup, setSetup] = useState<Values>(preset?.setup ?? {});
   const [name, setName] = useState("");
+  const [showOthers, setShowOthers] = useState(false);
 
   const byPlatform = (p: Platform) => (accounts.data ?? []).filter((a) => a.platform === p);
   const spec = platform ? BUILDER_SPECS[platform] : null;
@@ -39,6 +40,10 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
   // Says what's still missing, so a greyed-out Continue never leaves people guessing.
   const missing = !platform ? null : platformAccounts.length === 0 ? `Connect a ${PLATFORM_INFO[platform].name} ad account` : !account ? "Select an ad account" : unchosen ? `Select the ${unchosen.label.toLowerCase()}` : name.trim().length < 2 ? "Name your campaign" : null;
   const locked = Boolean(preset?.platform);
+  // Platforms with an ad account here come first; the rest are a click away and lead to connecting them.
+  const connected = VISIBLE_PLATFORMS.filter((p) => byPlatform(p).length > 0);
+  const others = VISIBLE_PLATFORMS.filter((p) => byPlatform(p).length === 0);
+  const othersOpen = showOthers || connected.length === 0;
 
   if (accounts.isLoading) return <Skeleton className="h-[480px] rounded-xl" />;
 
@@ -87,34 +92,75 @@ export function BuilderStart({ onStart, preset }: { onStart: (draft: BuilderDraf
             <h2 className="text-lg font-semibold tracking-tight">Where do you want to advertise?</h2>
             <p className="text-sm text-muted-foreground">You&apos;ll get the same options as in each platform&apos;s own ads manager.</p>
           </div>
-          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-            {VISIBLE_PLATFORMS.map((p) => {
-              const count = byPlatform(p).length;
-              const active = platform === p;
-              return (
+          {connected.length > 0 && (
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              {connected.map((p) => {
+                const count = byPlatform(p).length;
+                const active = platform === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => {
+                      setPlatform(p);
+                      setAccountId(null);
+                      setSetup({});
+                    }}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl border p-3.5 text-left transition-all",
+                      active ? "border-primary bg-primary/[0.04] ring-1 ring-primary" : "hover:border-foreground/20 hover:bg-muted/40",
+                    )}
+                  >
+                    <PlatformIcon platform={p} size="md" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{PLATFORM_INFO[p].name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{count} ad {count === 1 ? "account" : "accounts"}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {others.length > 0 && (
+            <div className="space-y-2.5">
+              {connected.length > 0 ? (
                 <button
-                  key={p}
                   type="button"
-                  disabled={count === 0}
-                  onClick={() => {
-                    setPlatform(p);
-                    setAccountId(null);
-                    setSetup({});
-                  }}
-                  className={cn(
-                    "flex items-center gap-3 rounded-xl border p-3.5 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50",
-                    active ? "border-primary bg-primary/[0.04] ring-1 ring-primary" : "hover:border-foreground/20 hover:bg-muted/40",
-                  )}
+                  onClick={() => setShowOthers((v) => !v)}
+                  aria-expanded={showOthers}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
                 >
-                  <PlatformIcon platform={p} size="md" />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold">{PLATFORM_INFO[p].name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{count ? `${count} ad ${count === 1 ? "account" : "accounts"}` : "Not connected"}</span>
-                  </span>
+                  <ChevronDown className={cn("size-4 transition-transform", showOthers && "rotate-180")} />
+                  {showOthers ? "Hide other platforms" : `Connect another platform (${others.length} more)`}
                 </button>
-              );
-            })}
-          </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No platform is connected to this workspace yet. Pick one to connect it first.</p>
+              )}
+              {othersOpen && (
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  {others.map((p) =>
+                    PLATFORM_INFO[p].availability === "coming_soon" ? (
+                      <div key={p} className="flex items-center gap-3 rounded-xl border border-dashed p-3.5 opacity-60">
+                        <PlatformIcon platform={p} size="md" />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold">{PLATFORM_INFO[p].name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">Coming soon</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <Link key={p} href={`/w/${workspace.id}/integrations`} className="flex items-center gap-3 rounded-xl border border-dashed p-3.5 transition-all hover:border-foreground/30 hover:bg-muted/40">
+                        <PlatformIcon platform={p} size="md" />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold">{PLATFORM_INFO[p].name}</span>
+                          <span className="flex items-center gap-1 truncate text-xs text-primary"><Link2 className="size-3" /> Connect</span>
+                        </span>
+                      </Link>
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {(accounts.data ?? []).length === 0 && (
             <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
               <div className="font-medium">The “{workspace.name}” workspace has no ad accounts yet.</div>

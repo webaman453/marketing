@@ -62,6 +62,8 @@ export const ruleSchema = z
     lookbackDays: z.number().int().min(1).max(30).default(3),
     frequency: z.enum(["HOURLY", "DAILY"]).default("DAILY"),
     cooldownHours: z.number().int().min(1).max(168).default(24),
+    /** Ask a person before applying pause, activate and budget actions. */
+    requireApproval: z.boolean().default(false),
   })
   .refine(
     (r) => r.actions.every((a) => !["INCREASE_BUDGET", "DECREASE_BUDGET"].includes(a.type) || a.percent),
@@ -87,8 +89,11 @@ export function compare(value: number | null, op: RuleOperator, target: number):
   }
 }
 
+/** A ready-made rule: everything but the name, on/off state and approval mode, which the person chooses. */
+export type RuleTemplateBody = Omit<RuleInput, "name" | "isActive" | "requireApproval">;
+
 /** Ready-made rules shown in the builder. */
-export const RULE_TEMPLATES: { name: string; description: string; rule: Omit<RuleInput, "name" | "isActive"> }[] = [
+export const RULE_TEMPLATES: { name: string; description: string; rule: RuleTemplateBody }[] = [
   {
     name: "Pause campaigns with poor ROAS",
     description: "Pause when return on ad spend stays below 1× over 3 days.",
@@ -128,4 +133,100 @@ export const RULE_TEMPLATES: { name: string; description: string; rule: Omit<Rul
       cooldownHours: 24,
     },
   },
+  {
+    name: "Pause campaigns with high cost per conversion",
+    description: "Pause when cost per conversion stays above a limit over 3 days. Set the limit to your own target.",
+    rule: {
+      scope: { platforms: [], campaignIds: [], minSpend: 1500 },
+      conditionLogic: "ALL",
+      conditions: [{ metric: "cpa", operator: "gt", value: 800 }],
+      actions: [{ type: "PAUSE" }, { type: "NOTIFY", email: true }],
+      lookbackDays: 3,
+      frequency: "DAILY",
+      cooldownHours: 24,
+    },
+  },
+  {
+    name: "Spending but not converting",
+    description: "Pause campaigns that spent real money over 3 days without a single conversion.",
+    rule: {
+      scope: { platforms: [], campaignIds: [], minSpend: 1000 },
+      conditionLogic: "ALL",
+      conditions: [{ metric: "conversions", operator: "lt", value: 1 }],
+      actions: [{ type: "PAUSE" }, { type: "NOTIFY", email: true }],
+      lookbackDays: 3,
+      frequency: "DAILY",
+      cooldownHours: 24,
+    },
+  },
+  {
+    name: "Warn on low click-through rate",
+    description: "Notify the team when CTR drops below 0.5% on campaigns with real reach. Often a sign of tired creative.",
+    rule: {
+      scope: { platforms: [], campaignIds: [], minSpend: 500 },
+      conditionLogic: "ALL",
+      conditions: [{ metric: "ctr", operator: "lt", value: 0.5 }, { metric: "impressions", operator: "gt", value: 5000 }],
+      actions: [{ type: "NOTIFY" }],
+      lookbackDays: 3,
+      frequency: "DAILY",
+      cooldownHours: 72,
+    },
+  },
+  {
+    name: "Trim budget on weak ROAS",
+    description: "Lower the daily budget 20% when ROAS stays under 1.5× for a week. Gentler than pausing.",
+    rule: {
+      scope: { platforms: [], campaignIds: [], minSpend: 2000 },
+      conditionLogic: "ALL",
+      conditions: [{ metric: "roas", operator: "lt", value: 1.5 }],
+      actions: [{ type: "DECREASE_BUDGET", percent: 20 }, { type: "NOTIFY" }],
+      lookbackDays: 7,
+      frequency: "DAILY",
+      cooldownHours: 96,
+    },
+  },
+  {
+    name: "Alert on expensive impressions",
+    description: "Notify when CPM climbs above a limit, which usually means rising competition or a narrow audience.",
+    rule: {
+      scope: { platforms: [], campaignIds: [], minSpend: 500 },
+      conditionLogic: "ALL",
+      conditions: [{ metric: "cpm", operator: "gt", value: 400 }],
+      actions: [{ type: "NOTIFY" }],
+      lookbackDays: 2,
+      frequency: "DAILY",
+      cooldownHours: 48,
+    },
+  },
 ];
+
+/** Roughly what 1 INR is worth, only to size the example thresholds in templates for another currency. */
+const PER_INR: Record<string, number> = { INR: 1, USD: 0.012, EUR: 0.011, GBP: 0.0095, AED: 0.044, SGD: 0.016, AUD: 0.018, CAD: 0.016, NZD: 0.02, CHF: 0.011, JPY: 1.8, SAR: 0.045, ZAR: 0.22, BRL: 0.065, MXN: 0.21, IDR: 190, THB: 0.43, MYR: 0.055, PHP: 0.69, BDT: 1.4, LKR: 3.6, NPR: 1.6, PKR: 3.4 };
+
+/** Two significant digits, so a scaled threshold reads like a number a person would pick (0.6, 9.5, 66000). */
+function nice(value: number): number {
+  if (value === 0) return 0;
+  const digits = 2 - Math.ceil(Math.log10(Math.abs(value)));
+  const f = 10 ** digits;
+  return Math.round(value * f) / f;
+}
+
+export function templateNeedsScaling(currency: string) {
+  return currency !== "INR" && currency in PER_INR;
+}
+
+/**
+ * Template amounts (spend floors, CPC/CPM/CPA limits, budget caps) are examples written in INR.
+ * Returns the rule with them sized for the workspace currency; unchanged for INR or a currency we have no rough rate for.
+ */
+export function scaleRuleForCurrency<T extends RuleTemplateBody>(rule: T, currency: string): T {
+  const factor = PER_INR[currency];
+  if (!factor || factor === 1) return rule;
+  const money = new Set<RuleMetric>(["spend", "cpc", "cpm", "cpa"]);
+  return {
+    ...rule,
+    scope: { ...rule.scope, minSpend: nice(rule.scope.minSpend * factor) },
+    conditions: rule.conditions.map((c) => (money.has(c.metric) ? { ...c, value: nice(c.value * factor) } : c)),
+    actions: rule.actions.map((a) => (a.maxBudget ? { ...a, maxBudget: nice(a.maxBudget * factor) } : a)),
+  };
+}

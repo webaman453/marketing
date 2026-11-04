@@ -5,6 +5,7 @@
 import { num, prisma, type Prisma, type Rule } from "@ashniva/db";
 import {
   ACTION_LABELS,
+  type RuleAction,
   METRIC_FORMATS,
   OPERATOR_LABELS,
   addDays,
@@ -39,6 +40,32 @@ export function describeConditions(rule: Pick<Rule, "conditions" | "conditionLog
       return `${f.label} ${OPERATOR_LABELS[c.operator]} ${value}`;
     })
     .join(rule.conditionLogic === "ANY" ? " or " : " and ");
+}
+
+type CampaignForAction = Parameters<typeof changeCampaignStatus>[0];
+export type ActionActor = { orgId: string; workspaceId: string; userId: string | null; via: string };
+
+/**
+ * Applies one rule action to one campaign. Throws when the platform or the campaign refuses.
+ * Returns a short note for the run history ("10 → 12"), when there is one.
+ */
+export async function applyRuleAction(c: CampaignForAction, action: RuleAction, actor: ActionActor): Promise<string | undefined> {
+  if (action.type === "PAUSE") {
+    await changeCampaignStatus(c, "PAUSED", actor);
+  } else if (action.type === "ACTIVATE") {
+    await changeCampaignStatus(c, "ACTIVE", actor);
+  } else if (action.type === "INCREASE_BUDGET" || action.type === "DECREASE_BUDGET") {
+    const current = c.dailyBudget == null ? null : num(c.dailyBudget);
+    if (current == null) throw new Error("Campaign has no daily budget");
+    const factor = 1 + ((action.type === "INCREASE_BUDGET" ? 1 : -1) * (action.percent ?? 10)) / 100;
+    let next = Math.round(current * factor * 100) / 100;
+    // The cap limits how far an increase goes; it never lowers a budget that is already above it.
+    if (action.maxBudget && next > action.maxBudget) next = Math.max(current, action.maxBudget);
+    if (next === current) return "Already at the budget cap";
+    await changeCampaignBudget(c, next, actor);
+    return `${current} → ${next}`;
+  }
+  return undefined;
 }
 
 export interface EvaluateOptions {
@@ -102,6 +129,17 @@ export async function evaluateRule(ruleId: string, opts: EvaluateOptions = {}) {
     );
     const cooldownCutoff = Date.now() - rule.cooldownHours * 3600_000;
 
+    // In "ask me first" mode a campaign already waiting for a decision isn't suggested again.
+    const pending = new Set(
+      rule.requireApproval && !dryRun
+        ? (await prisma.ruleSuggestion.findMany({ where: { ruleId, status: "PENDING" }, select: { campaignId: true } })).map((s) => s.campaignId)
+        : [],
+    );
+    if (rule.requireApproval && !dryRun) {
+      // A week without an answer and the moment has passed.
+      await prisma.ruleSuggestion.updateMany({ where: { ruleId, status: "PENDING", createdAt: { lt: new Date(Date.now() - 7 * 86_400_000) } }, data: { status: "EXPIRED" } });
+    }
+    let suggested = 0;
     const details: RuleRunDetail[] = [];
     let evaluated = 0;
     for (const c of campaigns) {
@@ -110,6 +148,7 @@ export async function evaluateRule(ruleId: string, opts: EvaluateOptions = {}) {
       // PAUSE only makes sense on active campaigns and ACTIVATE on paused ones.
       if (actions.every((a) => a.type === "PAUSE") && c.status !== "ACTIVE") continue;
       if (actions.every((a) => a.type === "ACTIVATE") && c.status !== "PAUSED") continue;
+      if (pending.has(c.id)) continue;
       evaluated++;
 
       // Ratio metrics are stored as fractions; conditions are entered as percentages.
@@ -136,31 +175,34 @@ export async function evaluateRule(ruleId: string, opts: EvaluateOptions = {}) {
           detail.actions.push({ type: action.type, ok: true, detail: "Would run (preview)" });
           continue;
         }
+        if (rule.requireApproval && action.type !== "NOTIFY") {
+          detail.actions.push({ type: action.type, ok: true, detail: "Waiting for approval" });
+          continue;
+        }
         try {
-          if (action.type === "PAUSE") {
-            await changeCampaignStatus(c, "PAUSED", actor);
-            detail.actions.push({ type: action.type, ok: true });
-          } else if (action.type === "ACTIVATE") {
-            await changeCampaignStatus(c, "ACTIVE", actor);
-            detail.actions.push({ type: action.type, ok: true });
-          } else if (action.type === "INCREASE_BUDGET" || action.type === "DECREASE_BUDGET") {
-            const current = c.dailyBudget == null ? null : num(c.dailyBudget);
-            if (current == null) throw new Error("Campaign has no daily budget");
-            const factor = 1 + ((action.type === "INCREASE_BUDGET" ? 1 : -1) * (action.percent ?? 10)) / 100;
-            let next = Math.round(current * factor * 100) / 100;
-            // The cap limits how far an increase goes; it never lowers a budget that is already above it.
-            if (action.maxBudget && next > action.maxBudget) next = Math.max(current, action.maxBudget);
-            if (next === current) {
-              detail.actions.push({ type: action.type, ok: true, detail: "Already at the budget cap" });
-            } else {
-              await changeCampaignBudget(c, next, actor);
-              detail.actions.push({ type: action.type, ok: true, detail: `${current} → ${next}` });
-            }
-          } else if (action.type === "NOTIFY") {
-            detail.actions.push({ type: action.type, ok: true });
-          }
+          const note = await applyRuleAction(c, action, actor);
+          detail.actions.push({ type: action.type, ok: true, ...(note ? { detail: note } : {}) });
         } catch (err) {
           detail.actions.push({ type: action.type, ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      if (!dryRun && rule.requireApproval) {
+        const proposed = actions.filter((a) => a.type !== "NOTIFY");
+        if (proposed.length > 0 && !pending.has(c.id)) {
+          await prisma.ruleSuggestion.create({
+            data: {
+              ruleId,
+              orgId: rule.orgId,
+              workspaceId: rule.workspaceId,
+              campaignId: c.id,
+              campaignName: c.name,
+              platform: c.platform,
+              actions: proposed as unknown as Prisma.InputJsonValue,
+              values: values as unknown as Prisma.InputJsonValue,
+            },
+          });
+          suggested++;
         }
       }
 
@@ -176,7 +218,7 @@ export async function evaluateRule(ruleId: string, opts: EvaluateOptions = {}) {
 
     const acted = details.filter((d) => d.actions.some((a) => a.type !== "SKIPPED"));
     const notifyAction = actions.find((a) => a.type === "NOTIFY");
-    if (!dryRun && notifyAction && acted.length > 0) {
+    if (!dryRun && !(rule.requireApproval && actions.some((a) => a.type !== "NOTIFY")) && notifyAction && acted.length > 0) {
       const names = acted.slice(0, 5).map((d) => d.campaignName);
       const other = actions.filter((a) => a.type !== "NOTIFY").map((a) => ACTION_LABELS[a.type].toLowerCase());
       await notify({
@@ -189,6 +231,23 @@ export async function evaluateRule(ruleId: string, opts: EvaluateOptions = {}) {
         roles: ["OWNER", "ADMIN"],
         userIds: rule.createdById ? [rule.createdById] : [],
         email: Boolean(notifyAction.email),
+        emailPref: "ruleAlerts",
+      });
+    }
+
+    if (!dryRun && suggested > 0) {
+      const names = details.filter((d) => d.actions.some((a) => a.detail === "Waiting for approval")).slice(0, 5).map((d) => d.campaignName);
+      await notify({
+        orgId: rule.orgId,
+        workspaceId: rule.workspaceId,
+        type: "rule.suggested",
+        title: `Rule “${rule.name}” suggests changes to ${suggested} ${suggested === 1 ? "campaign" : "campaigns"}`,
+        body: `${describeConditions(rule, rule.workspace.currency)}. Nothing has changed yet: review and approve in Automations. ${names.join(", ")}${suggested > names.length ? ` and ${suggested - names.length} more` : ""}.`,
+        link: `/w/${rule.workspaceId}/automations`,
+        ctaLabel: "Review suggestions",
+        roles: ["OWNER", "ADMIN", "MANAGER"],
+        userIds: rule.createdById ? [rule.createdById] : [],
+        email: Boolean(actions.find((a) => a.type === "NOTIFY")?.email),
         emailPref: "ruleAlerts",
       });
     }

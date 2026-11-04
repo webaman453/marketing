@@ -32,6 +32,7 @@ const toRuleDTO = (r: Rule & { runs?: RuleRun[] }): RuleDTO => ({
   lookbackDays: r.lookbackDays,
   frequency: r.frequency,
   cooldownHours: r.cooldownHours,
+  requireApproval: r.requireApproval,
   lastRunAt: r.lastRunAt?.toISOString() ?? null,
   nextRunAt: r.nextRunAt?.toISOString() ?? null,
   lastRun: r.runs?.[0] ? toRunDTO(r.runs[0]) : null,
@@ -78,6 +79,7 @@ const data = (input: z.infer<typeof ruleSchema>) => ({
   lookbackDays: input.lookbackDays,
   frequency: input.frequency,
   cooldownHours: input.cooldownHours,
+  requireApproval: input.requireApproval,
 });
 
 rulesRouter.post("/rules", requirePermission("campaigns:edit"), async (req, res) => {

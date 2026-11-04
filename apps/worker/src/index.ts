@@ -13,6 +13,8 @@ const { prisma } = await import("@ashniva/db");
 const {
   AUTOMATION_QUEUE,
   SYNC_QUEUE,
+  activeSyncConnectionIds,
+  checkAnomalies,
   checkSpendBudgets,
   deliverReport,
   enqueueSync,
@@ -30,6 +32,9 @@ const log = (msg: string, extra?: unknown) =>
   console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`, extra ?? "");
 
 const intervalMin = Number(process.env.SYNC_INTERVAL_MINUTES ?? 180);
+// Accounts with running campaigns are synced more often, so rules, budgets and alerts see fresh numbers.
+// Set to 0 to turn this off. Mind each platform's API quota before going much below 30.
+const activeIntervalMin = Number(process.env.SYNC_ACTIVE_INTERVAL_MINUTES ?? 30);
 
 // Keys and prices from the admin console; refreshed before each job (cached for a few seconds).
 await loadPlatformSettings(true).catch((err: unknown) => log("Couldn't load platform settings; using .env only", err));
@@ -50,6 +55,12 @@ const syncWorker = new Worker(
       const active = connections.filter((c) => !isOrgLocked(c.org));
       for (const c of active) await enqueueSync(c.id, "schedule");
       return { queued: active.length };
+    }
+
+    if (job.name === "sync-active") {
+      const ids = await activeSyncConnectionIds(new Date(), Math.max(5, Math.floor(activeIntervalMin * 0.6)));
+      for (const id of ids) await enqueueSync(id, "schedule");
+      return { queued: ids.length };
     }
 
     const { connectionId, trigger } = job.data;
@@ -114,6 +125,12 @@ const automationWorker = new Worker(
         if (run.alerts || run.paused) log(`spend: ${run.checked} budgets, ${run.alerts} alerts, ${run.paused} campaigns paused`);
         return run;
       }
+      case "anomaly-tick": {
+        // Spend spikes and campaigns that spend without recording conversions.
+        const run = await checkAnomalies(now);
+        if (run.alerts) log(`anomalies: ${run.checked} campaigns checked, ${run.alerts} alerts`);
+        return run;
+      }
       case "fx-refresh": {
         // ECB reference rates for currency conversion in workspace totals.
         const { stored } = await refreshRates();
@@ -134,13 +151,19 @@ await getSyncQueue().upsertJobScheduler(
   { every: intervalMin * 60_000 },
   { name: "sync-all", data: { connectionId: "", trigger: "schedule" } },
 );
+if (activeIntervalMin > 0 && activeIntervalMin < intervalMin) {
+  await getSyncQueue().upsertJobScheduler("sync-active", { every: activeIntervalMin * 60_000 }, { name: "sync-active", data: { connectionId: "", trigger: "schedule" } });
+} else {
+  await getSyncQueue().removeJobScheduler("sync-active").catch(() => undefined);
+}
 await getAutomationQueue().upsertJobScheduler("rules-tick", { every: 5 * 60_000 }, { name: "rules-tick" });
 await getAutomationQueue().upsertJobScheduler("reports-tick", { every: 5 * 60_000 }, { name: "reports-tick" });
 // Spend comes in with each sync; checking budgets every 15 minutes keeps a pause close to the limit.
 await getAutomationQueue().upsertJobScheduler("spend-tick", { every: 15 * 60_000 }, { name: "spend-tick" });
+await getAutomationQueue().upsertJobScheduler("anomaly-tick", { every: 60 * 60_000 }, { name: "anomaly-tick" });
 // The ECB publishes once a weekday around 16:00 CET; checking every 6 hours keeps the cache current.
 await getAutomationQueue().upsertJobScheduler("fx-refresh", { every: 6 * 60 * 60_000 }, { name: "fx-refresh" });
-log(`worker ready · re-syncing every ${intervalMin} min · rules & reports checked every 5 min`);
+log(`worker ready · re-syncing every ${intervalMin} min (running campaigns every ${activeIntervalMin || "-"} min) · rules & reports checked every 5 min`);
 
 async function shutdown() {
   log("shutting down");
